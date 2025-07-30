@@ -2,35 +2,22 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "flex_alloc.h" // use the project allocator
 
 #define NUM_CLUSTERS 2
 #define CORES_PER_CLUSTER 2
-#define MAX_BLOCKS_PER_CORE 32
 #define MAX_CLUSTER_WIDE_FREE_BLOCKS 64
 
-// Metadata for each L1 block.
-typedef struct {
-    void *l1_addr;
-    uint32_t size;
-    uint8_t in_use;   // 1 = allocated, 0 = free
-    uint8_t canary;   // For corruption detection
-} l1_block_info_t;
-
-// Per-core metadata.
-typedef struct {
-    l1_block_info_t blocks[MAX_BLOCKS_PER_CORE];
-    uint32_t num_blocks;
-} core_l1_metadata_t;
+// Use the allocator's types for per-core heaps
+// Each core in each cluster gets its own allocator
+__attribute__((section(".hbm")))
+extern alloc_t hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
 // Info for cluster-wide free blocks.
 typedef struct {
     void *start_addr;
     uint32_t size;
 } free_block_info_t;
-
-// Per-core metadata in HBM
-__attribute__((section(".hbm")))
-extern core_l1_metadata_t hbm_l1_metadata[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
 // Per-cluster cluster-wide free blocks in HBM
 __attribute__((section(".hbm")))
@@ -42,44 +29,10 @@ extern uint32_t hbm_cluster_wide_free_block_count[NUM_CLUSTERS];
 extern volatile int cluster_lock[NUM_CLUSTERS];
 
 // API functions
-void flex_l1_init(void);
-void flex_l1_block_alloc(int cluster_id, int core_id, void *addr, uint32_t size);
-void flex_l1_block_free(int cluster_id, int core_id, void *addr);
+void flex_l1_allocators_init(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER], uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER]);
+void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t size);
+void flex_l1_block_free(int cluster_id, int core_id, void *ptr);
 void update_cluster_wide_free_blocks(int cluster_id);
-
-void update_cluster_wide_free_blocks(int cluster_id)
-{
-    hbm_cluster_wide_free_block_count[cluster_id] = 0;
-
-    // For each block in core 0, check if it is free in all other cores
-    for (int b = 0; b < hbm_l1_metadata[cluster_id][0].num_blocks; ++b) {
-        l1_block_info_t *ref_blk = &hbm_l1_metadata[cluster_id][0].blocks[b];
-        if (!ref_blk->l1_addr || ref_blk->in_use) continue;
-
-        int is_free_all = 1;
-        for (int core = 1; core < CORES_PER_CLUSTER; ++core) {
-            int found = 0;
-            for (int bb = 0; bb < hbm_l1_metadata[cluster_id][core].num_blocks; ++bb) {
-                l1_block_info_t *blk = &hbm_l1_metadata[cluster_id][core].blocks[bb];
-                if (blk->l1_addr == ref_blk->l1_addr &&
-                    blk->size == ref_blk->size &&
-                    !blk->in_use) {
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                is_free_all = 0;
-                break;
-            }
-        }
-        if (is_free_all && hbm_cluster_wide_free_block_count[cluster_id] < MAX_CLUSTER_WIDE_FREE_BLOCKS) {
-            hbm_cluster_wide_free_blocks[cluster_id][hbm_cluster_wide_free_block_count[cluster_id]].start_addr = ref_blk->l1_addr;
-            hbm_cluster_wide_free_blocks[cluster_id][hbm_cluster_wide_free_block_count[cluster_id]].size = ref_blk->size;
-            hbm_cluster_wide_free_block_count[cluster_id]++;
-        }
-    }
-}
 
 
 
