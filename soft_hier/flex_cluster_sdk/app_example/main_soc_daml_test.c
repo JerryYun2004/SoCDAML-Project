@@ -3,24 +3,27 @@
 #include "soc_daml.h"
 
 // Dummy memory regions for each core (simulate L1)
-// In real hardware, these would be actual L1 memory regions.
-// For simulation, we use statically allocated arrays.
+// In real hardware, these would be distinct L1 memory segments local to each processor core.
+// For simulation and testing, we use statically allocated arrays in system RAM.
 #define L1_MEM_SIZE 4096
 uint8_t l1_mem[NUM_CLUSTERS][CORES_PER_CLUSTER][L1_MEM_SIZE];
 
 int main() {
-    // Prepare base addresses and sizes for each core's heap
+    // Arrays to hold the base addresses and sizes of each core's simulated L1 memory region.
+    // These are used to initialize the memory allocators for each core.
     void* base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER];
     uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
+    // Assign each core in each cluster its own memory region and size.
     for (int c = 0; c < NUM_CLUSTERS; ++c) {
         for (int core = 0; core < CORES_PER_CLUSTER; ++core) {
-            base_addrs[c][core] = l1_mem[c][core];
-            sizes[c][core] = L1_MEM_SIZE;
+            base_addrs[c][core] = l1_mem[c][core];      // Base address of memory region for each core
+            sizes[c][core] = L1_MEM_SIZE;               // Size for each region (fixed for this test)
         }
     }
 
     printf("Initializing allocators...\n");
+    // Initialize the per-core allocators with their respective memory regions.
     flex_l1_allocators_init(base_addrs, sizes);
 
     // Allocate memory on cluster 0, core 0
@@ -35,29 +38,32 @@ int main() {
     if (ptr1) printf("Allocation successful: %p\n", ptr1);
     else printf("Allocation failed!\n");
 
-    // Free memory and update free blocks
+    // Free the previously allocated memory blocks and update the cluster-wide free block tracking structures.
     printf("Freeing memory and updating cluster-wide free blocks...\n");
     flex_l1_block_free(0, 0, ptr0);
     flex_l1_block_free(1, 1, ptr1);
 
+    // Scan all cores in each cluster to update the list of blocks that are free across the entire cluster.
     update_cluster_wide_free_blocks(0);
     update_cluster_wide_free_blocks(1);
 
+    // Print the number and details of cluster-wide free blocks for cluster 0.
     printf("Cluster-wide free blocks (cluster 0): %u\n", hbm_cluster_wide_free_block_count[0]);
-    for (uint32_t i=0; i<hbm_cluster_wide_free_block_count[0]; ++i) {
+    for (uint32_t i = 0; i < hbm_cluster_wide_free_block_count[0]; ++i) {
         printf("  Free block %u: addr=%p size=%u\n", i,
             hbm_cluster_wide_free_blocks[0][i].start_addr,
             hbm_cluster_wide_free_blocks[0][i].size);
     }
 
+    // Print the number and details of cluster-wide free blocks for cluster 1.
     printf("Cluster-wide free blocks (cluster 1): %u\n", hbm_cluster_wide_free_block_count[1]);
-    for (uint32_t i=0; i<hbm_cluster_wide_free_block_count[1]; ++i) {
+    for (uint32_t i = 0; i < hbm_cluster_wide_free_block_count[1]; ++i) {
         printf("  Free block %u: addr=%p size=%u\n", i,
             hbm_cluster_wide_free_blocks[1][i].start_addr,
             hbm_cluster_wide_free_blocks[1][i].size);
     }
 
-    // Spinlock test
+    // Demonstrate the usage of the cluster spinlock for protecting cluster-wide data structures.
     printf("Testing cluster spinlock...\n");
     lock(0);
     printf("Cluster 0 locked!\n");
