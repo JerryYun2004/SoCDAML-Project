@@ -11,10 +11,10 @@ uint32_t hbm_cluster_wide_free_block_count[NUM_CLUSTERS];
 
 volatile int cluster_lock[NUM_CLUSTERS] = {0};
 
-static void lock(int cluster_id) {
+void lock(int cluster_id) {
     while (__sync_lock_test_and_set(&cluster_lock[cluster_id], 1)) { /* spin */ }
 }
-static void unlock(int cluster_id) {
+void unlock(int cluster_id) {
     __sync_lock_release(&cluster_lock[cluster_id]);
 }
 
