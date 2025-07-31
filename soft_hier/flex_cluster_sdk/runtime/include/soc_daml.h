@@ -17,16 +17,6 @@ extern alloc_t hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
 void lock(int cluster_id);
 void unlock(int cluster_id);
 
-void lock(int cluster_id) {
-    while (__sync_lock_test_and_set(&cluster_lock[cluster_id], 1)) {
-        // spin until the lock is acquired
-    }
-}
-
-void unlock(int cluster_id) {
-    __sync_lock_release(&cluster_lock[cluster_id]);
-}
-
 // Info for cluster-wide free blocks.
 typedef struct {
     void *start_addr;
