@@ -74,6 +74,12 @@ void flex_l1_block_free(int cluster_id, int core_id, void *ptr);
 // Scan all per-core allocators in a cluster and refresh the list of blocks that are free in every core (cluster-wide).
 void update_cluster_wide_free_blocks(int cluster_id);
 
+
+
+
+
+
+
 /*
     Key Challenges:
         - Each cluster has its own private L1 allocator, isolated from others.
@@ -143,7 +149,7 @@ void update_cluster_wide_free_blocks(int cluster_id);
         }
 
         // Use iDMA to request data from another cluster
-        uint32_t src_addr = get_allocated_address(/* cluster 0 */ 0);
+        uint32_t src_addr = get_allocated_address(/ cluster 0 / 0);
         uint32_t dst_addr = flex_l1_malloc(size);  // locally allocated
         start_idma_transfer(src_addr, dst_addr, size);  // Implement the DMA engine logic
 
