@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include "flex_alloc.h" // Project-specific allocator header
 
 // ---------------------------
@@ -23,17 +24,24 @@
 
 // Each core in each cluster has its own L1 allocator state, placed in HBM for bandwidth and accessibility reasons.
 __attribute__((section(".hbm")))
-extern alloc_t hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
+alloc_t hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
 // --------------------------------
 // Cluster-level synchronization API
 // --------------------------------
 
+// Array of simple spinlocks, one per cluster, for basic concurrency control.
+volatile int cluster_lock[NUM_CLUSTERS] = {0};
+
 // Acquire the spinlock for a cluster (for concurrency protection)
-void lock(int cluster_id);
+static inline void lock(int cluster_id) {
+    while (__sync_lock_test_and_set(&cluster_lock[cluster_id], 1)) { /* spin until lock acquired */ }
+}
 
 // Release the spinlock for a cluster
-void unlock(int cluster_id);
+static inline void unlock(int cluster_id) {
+    __sync_lock_release(&cluster_lock[cluster_id]);
+}
 
 // ------------------------------------------
 // Cluster-wide free block tracking structures
@@ -47,38 +55,91 @@ typedef struct {
 
 // Array of cluster-wide free block metadata per cluster, placed in HBM for global access.
 __attribute__((section(".hbm")))
-extern free_block_info_t hbm_cluster_wide_free_blocks[NUM_CLUSTERS][MAX_CLUSTER_WIDE_FREE_BLOCKS];
+free_block_info_t hbm_cluster_wide_free_blocks[NUM_CLUSTERS][MAX_CLUSTER_WIDE_FREE_BLOCKS];
 
 // Number of cluster-wide free blocks currently tracked for each cluster (in HBM).
 __attribute__((section(".hbm")))
-extern uint32_t hbm_cluster_wide_free_block_count[NUM_CLUSTERS];
-
-// Array of simple spinlocks, one per cluster, for basic concurrency control.
-extern volatile int cluster_lock[NUM_CLUSTERS];
+uint32_t hbm_cluster_wide_free_block_count[NUM_CLUSTERS];
 
 // -----------------------
 // Allocator Management API
 // -----------------------
 
-// Initialize all per-core L1 allocators for all clusters, given base addresses and memory sizes per core.
-// Also resets cluster-wide free block tracking and synchronization primitives.
-void flex_l1_allocators_init(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER], uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER]);
+/*
+ * Initialize all per-core L1 allocators for all clusters, given base addresses and memory sizes per core.
+ * Also resets cluster-wide free block tracking and synchronization primitives.
+ */
+static inline void flex_l1_allocators_init(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER], uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER]) {
+    for (int c = 0; c < NUM_CLUSTERS; ++c) {
+        for (int core = 0; core < CORES_PER_CLUSTER; ++core) {
+            // Initialize the allocator for each core in each cluster
+            flex_cluster_alloc_init(&hbm_l1_allocators[c][core], base_addrs[c][core], sizes[c][core]);
+        }
+    }
+    // Zero out cluster-wide free block tracking structures
+    memset(hbm_cluster_wide_free_blocks, 0, sizeof(hbm_cluster_wide_free_blocks));
+    memset(hbm_cluster_wide_free_block_count, 0, sizeof(hbm_cluster_wide_free_block_count));
+    memset((void*)cluster_lock, 0, sizeof(cluster_lock));
+}
 
-// Allocate a memory block of the given size from a specific core's L1 allocator.
-// Returns a pointer to the allocated memory or NULL on failure.
-void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t size);
+/*
+ * Allocate a memory block of the given size from a specific core's L1 allocator.
+ * Returns a pointer to the allocated memory or NULL on failure.
+ */
+static inline void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t size) {
+    lock(cluster_id);
+    void *ptr = domain_malloc(&hbm_l1_allocators[cluster_id][core_id], size);
+    update_cluster_wide_free_blocks(cluster_id); // Update cluster-wide free block info after allocation
+    unlock(cluster_id);
+    return ptr;
+}
 
-// Free a memory block previously allocated from a specific core's L1 allocator.
-void flex_l1_block_free(int cluster_id, int core_id, void *ptr);
+/*
+ * Free a memory block previously allocated from a specific core's L1 allocator.
+ */
+static inline void flex_l1_block_free(int cluster_id, int core_id, void *ptr) {
+    lock(cluster_id);
+    domain_free(&hbm_l1_allocators[cluster_id][core_id], ptr);
+    update_cluster_wide_free_blocks(cluster_id); // Update cluster-wide free block info after free
+    unlock(cluster_id);
+}
 
-// Scan all per-core allocators in a cluster and refresh the list of blocks that are free in every core (cluster-wide).
-void update_cluster_wide_free_blocks(int cluster_id);
-
-
-
-
-
-
+/*
+ * Scan all per-core allocators in a cluster and refresh the list of blocks that are free in every core (cluster-wide).
+ */
+static inline void update_cluster_wide_free_blocks(int cluster_id) {
+    hbm_cluster_wide_free_block_count[cluster_id] = 0;
+    alloc_t *core0_alloc = &hbm_l1_allocators[cluster_id][0];
+    alloc_block_t *blk0 = core0_alloc->first_block;
+    while (blk0) {
+        int is_free_all = 1;
+        // Check if this block is free in all other cores
+        for (int core = 1; core < CORES_PER_CLUSTER; ++core) {
+            alloc_t *other_alloc = &hbm_l1_allocators[cluster_id][core];
+            alloc_block_t *blk_other = other_alloc->first_block;
+            int found = 0;
+            while (blk_other) {
+                // Compare block address and size for match
+                if ((blk_other->size == blk0->size) && ((uintptr_t)blk_other == (uintptr_t)blk0)) {
+                    found = 1;
+                    break;
+                }
+                blk_other = blk_other->next;
+            }
+            if (!found) {
+                is_free_all = 0;
+                break;
+            }
+        }
+        // If block is free in all cores, record it for cluster-wide use
+        if (is_free_all && hbm_cluster_wide_free_block_count[cluster_id] < MAX_CLUSTER_WIDE_FREE_BLOCKS) {
+            hbm_cluster_wide_free_blocks[cluster_id][hbm_cluster_wide_free_block_count[cluster_id]].start_addr = (void*)blk0;
+            hbm_cluster_wide_free_blocks[cluster_id][hbm_cluster_wide_free_block_count[cluster_id]].size = blk0->size;
+            hbm_cluster_wide_free_block_count[cluster_id]++;
+        }
+        blk0 = blk0->next;
+    }
+}
 
 /*
     Key Challenges:
