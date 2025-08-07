@@ -9,7 +9,7 @@
 
 set(SRC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main_soc_daml_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../flex_cluster_sdk/runtime/include/soc_daml.c
+    # ${CMAKE_CURRENT_SOURCE_DIR}/../../flex_cluster_sdk/runtime/include/soc_daml.c
 )
 
 set(SOURCES ${SRC_SOURCES} PARENT_SCOPE)
