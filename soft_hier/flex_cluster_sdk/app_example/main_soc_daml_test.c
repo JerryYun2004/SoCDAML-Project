@@ -73,7 +73,24 @@ int main(void)
 {
     uint32_t eoc_val = 0;
 
+    /* Init barriers, then WAKE THE WHOLE MESH before first global barrier */
     flex_barrier_xy_init();
+
+    if (flex_is_first_core() && flex_get_cluster_id() == 0) {
+        /* Wakeup registers: X and Y cluster masks live at
+           ARCH_SOC_REGISTER_WAKEUP + 0x8 and +0xC respectively.
+           We set bits [0..NX-1] and [0..NY-1]. */
+        volatile uint32_t * const wake = (volatile uint32_t*)ARCH_SOC_REGISTER_WAKEUP;
+        const uint32_t mask_x = (ARCH_NUM_CLUSTER_X >= 32) ? 0xFFFFFFFFu
+                                                           : ((1u << ARCH_NUM_CLUSTER_X) - 1u);
+        const uint32_t mask_y = (ARCH_NUM_CLUSTER_Y >= 32) ? 0xFFFFFFFFu
+                                                           : ((1u << ARCH_NUM_CLUSTER_Y) - 1u);
+        wake[2] = mask_x;  /* +0x08 */
+        wake[3] = mask_y;  /* +0x0C */
+        __sync_synchronize();
+    }
+
+    /* Now it is safe to use a mesh-wide barrier */
     flex_global_barrier_xy();
 
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
@@ -82,6 +99,8 @@ int main(void)
         printf("[BOOT] Using %dx%d clusters, %d cores/cluster\n",
                ARCH_NUM_CLUSTER_X, ARCH_NUM_CLUSTER_Y, ARCH_NUM_CORE_PER_CLUSTER);
         printf("[BOOT] Building allocator maps...\n");
+        printf("[BOOT] Global metadata zeroed.\n");
+        printf("[BOOT] Initializing allocators in HBM...\n");
     }
     flex_global_barrier_xy();
 
@@ -106,12 +125,6 @@ int main(void)
             sizes[c][k]      = (end - start);
         }
     }
-
-    if (flex_is_first_core() && flex_get_cluster_id() == 0) {
-        printf("[BOOT] Global metadata zeroed.\n");
-        printf("[BOOT] Initializing allocators in HBM...\n");
-    }
-    flex_global_barrier_xy();
 
     /* Show arenas cluster-by-cluster for readability */
     if (flex_is_first_core()) {
