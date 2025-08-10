@@ -7,9 +7,6 @@
  *     start = max( start_c,k )
  *     end   = min( start_c,k + size_c,k )
  *     if (end > start) => common block exists for core k across clusters.
- *
- * This matches the example:
- *   C1: [0000..1500), C2: [0000..0FFF), C3: [0000..0200)  =>  [0000..0200)
  */
 
 #include <stdint.h>
@@ -66,13 +63,12 @@ daml_block_t g_hbm_core_free[NUM_CLUSTERS][CORES_PER_CLUSTER][MAX_FREE_BLOCKS_PE
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_core_free_count[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
-/* (Legacy exact “cluster-common” containers — kept for future; not used in relaxed rule) */
+/* Kept for completeness (not used by relaxed rule) */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_cluster_common[NUM_CLUSTERS][MAX_COMMON_BLOCKS];
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_cluster_common_count[NUM_CLUSTERS];
 
-/* Legacy “system-common” (exact) — not used in relaxed rule */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_system_common[MAX_COMMON_BLOCKS];
 __attribute__((section(".hbm")))
@@ -213,11 +209,6 @@ static inline void soc_daml_upload_free_list(int cluster_id, int core_id)
 /* ------------------------------------------------------------
  *           RELAXED system-common per-core (across clusters)
  * ------------------------------------------------------------ */
-/* For each core index k, intersect the *first* free block across clusters:
- *   start = max(starts)
- *   end   = min(starts + sizes)
- * If end > start => write common block and mark valid=1; else valid=0.
- */
 static inline void soc_daml_build_system_common_relaxed_per_core(void)
 {
   daml_lock_global();
@@ -229,8 +220,8 @@ static inline void soc_daml_build_system_common_relaxed_per_core(void)
 
     for (uint32_t c = 0; c < g_rt_num_clusters; ++c) {
       const uint32_t n = g_hbm_core_free_count[c][k];
-      if (n == 0) { have_any = 0; break; }  /* no free block at all on (c,k) */
-      const daml_block_t *b = &g_hbm_core_free[c][k][0];  /* only first block for relaxed rule */
+      if (n == 0) { have_any = 0; break; }          /* no free block on (c,k) */
+      const daml_block_t *b = &g_hbm_core_free[c][k][0]; /* first block only */
       if (b->addr == 0 || b->size == 0) { have_any = 0; break; }
 
       uintptr_t start = (uintptr_t)b->addr;
@@ -270,7 +261,7 @@ static inline void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t si
 
   void *ptr;
   daml_lock_cluster(cluster_id);
-  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);  /* from flex_alloc.h */
+  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
@@ -283,7 +274,7 @@ static inline void flex_l1_block_free(int cluster_id, int core_id, void *ptr)
   if (!daml_in_bounds_cc(cluster_id, core_id)) return;
 
   daml_lock_cluster(cluster_id);
-  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);          /* from flex_alloc.h */
+  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
@@ -306,17 +297,4 @@ static inline uint32_t soc_daml_get_system_common_relaxed_valid(int core_id) {
 }
 static inline const daml_block_t* soc_daml_get_system_common_relaxed(int core_id) {
   return ((unsigned)core_id < g_rt_cores_per_cluster) ? &g_hbm_system_common_relaxed_per_core[core_id] : (const daml_block_t*)0;
-}
-
-/* ------------------------------------------------------------
- *                No‑break shims (avoid ebreak)
- * ------------------------------------------------------------ */
-static inline void soc_nobrk_timer_start(void) { /* no-op */ }
-static inline void soc_nobrk_timer_end(void)   { /* no-op */ }
-
-/* Write EOC register directly without triggering an ebreak. */
-static inline void soc_nobrk_eoc(uint32_t value)
-{
-  volatile uint32_t *eoc = (volatile uint32_t *)(ARCH_SOC_REGISTER_EOC);
-  *eoc = value;
 }
