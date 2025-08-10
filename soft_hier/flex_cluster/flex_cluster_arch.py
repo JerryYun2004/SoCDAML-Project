@@ -75,7 +75,7 @@ class FlexClusterArch:
 
         #System
         self.instruction_mem_base    = 0x80000000
-        self.instruction_mem_size    = 0x00080000
+        self.instruction_mem_size    = 0x00400000
 
         self.soc_register_base       = 0x90000000
         self.soc_register_size       = 0x00010000
