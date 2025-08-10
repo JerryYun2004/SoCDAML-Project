@@ -176,12 +176,14 @@ int main(void)
     /* Ordered hello to show progress is clean */
     hello_ordered_all();
 
+    /* No‑break timer shims (no ebreak) */
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
-        flex_timer_start();
-        flex_timer_end();
+        soc_nobrk_timer_start();
+        soc_nobrk_timer_end();
     }
     flex_global_barrier_xy();
 
-    flex_eoc(eoc_val);
+    /* End of computation without ebreak */
+    soc_nobrk_eoc(eoc_val);
     return 0;
 }
