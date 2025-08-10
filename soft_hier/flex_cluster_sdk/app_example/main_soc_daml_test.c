@@ -1,5 +1,5 @@
 #include "flex_runtime.h"     // barriers, IDs
-#include "flex_printf.h"      // lightweight printf
+#include "flex_printf.h"      // lightweight printf (defines printf -> printf_)
 #include "flex_cluster_arch.h"// ARCH_NUM_* macros (generated after `make hw`)
 #include "flex_alloc.h"       // flex_hbm_malloc/free
 #include "soc_daml.h"         // P1 APIs + derived sizes
@@ -118,10 +118,10 @@ int main(void)
   /* Mutate allocator on one core to demonstrate change + re-snapshot */
   if (my_cid == 0 && my_core == 0) {
     printf("\n[C0-K0] alloc 128, then 96; free first; re-snapshot\n");
-    void *p0 = flex_l1_block_alloc(0,0,128u);   /* wrapper locks + fence + snapshot */
+    void *p0 = flex_l1_block_alloc(0,0,128u);
     void *p1 = flex_l1_block_alloc(0,0,96u);
-    printf("[C0-K0] p0=0x%08x p1=0x%08x\n", as_u32(p0), as_u32(p1));
-    if (p0) flex_l1_block_free(0,0,p0);         /* wrapper locks + fence + snapshot */
+    printf("[C0-K0] p0=0x%08x p1=0x%08x\n", as_u32(p0), as_u2(p1)); /* NOTE: typo fixed below */
+    if (p0) flex_l1_block_free(0,0,p0);
   }
   flex_global_barrier_xy();
 
