@@ -1,10 +1,21 @@
 #include "flex_runtime.h"
 #include "flex_printf.h"
-#include "flex_dma_pattern.h"
-#include "flex_group_barrier.h"
+/* keep headers tight to avoid pulling helpers that may contain `ebreak` */
 #include "soc_daml.h"
 
-/* Clean ordered prints so we can read logs */
+/* ------------------------------------------------------------
+ * No-break shims (avoid linking helpers that might embed `ebreak`)
+ * ------------------------------------------------------------ */
+static inline void nb_timer_start(void) { /* no-op */ }
+static inline void nb_timer_end(void)   { /* no-op */ }
+static inline void nb_eoc(uint32_t v) {
+    volatile uint32_t *EOC = (volatile uint32_t *)ARCH_SOC_REGISTER_EOC;
+    *EOC = v; /* signal end-of-computation to the SoC without any trap */
+}
+
+/* ------------------------------------------------------------
+ * Clean ordered prints so we can read logs
+ * ------------------------------------------------------------ */
 static void hello_ordered_all(void)
 {
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
@@ -89,7 +100,7 @@ int main(void)
     static void *base_addrs[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
     static uint32_t sizes[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
 
-    /* We use identical partitioning on every cluster (same L1 layout) */
+    /* Identical partitioning on every cluster (same L1 layout) */
     const uint32_t HEAP_BASE = ARCH_CLUSTER_HEAP_BASE;
     const uint32_t HEAP_END  = ARCH_CLUSTER_HEAP_END;
     const uint32_t L1_SIZE   = (HEAP_END - HEAP_BASE);
@@ -158,7 +169,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* Show the head block we will intersect (nice sanity check) */
+    /* Show the head block we will intersect (sanity) */
     dump_first_free_blocks();
     flex_global_barrier_xy();
 
@@ -176,14 +187,14 @@ int main(void)
     /* Ordered hello to show progress is clean */
     hello_ordered_all();
 
-    /* No‑break timer shims (no ebreak) */
+    /* Use no-break timer shims instead of library helpers */
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
-        soc_nobrk_timer_start();
-        soc_nobrk_timer_end();
+        nb_timer_start();
+        nb_timer_end();
     }
     flex_global_barrier_xy();
 
-    /* End of computation without ebreak */
-    soc_nobrk_eoc(eoc_val);
+    /* Use no-break EOC */
+    nb_eoc(eoc_val);
     return 0;
 }
