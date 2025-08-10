@@ -1,17 +1,16 @@
-#include "flex_runtime.h"      // barriers, IDs, EOC
-#include "flex_printf.h"       // lightweight printf (no <stdio.h>)
-#include "flex_cluster_arch.h" // ARCH_NUM_* macros (generated after `make hw`)
-#include "flex_alloc.h"        // flex_hbm_malloc/free
-#include "soc_daml.h"          // P1 APIs + derived sizes
 #include <stdint.h>
+#include "flex_runtime.h"
+#include "flex_printf.h"        // defines printf as printf_()
+#include "flex_cluster_arch.h"  // generated HW config
+#include "flex_alloc.h"
+#include "soc_daml.h"
 
-/* Small per-(cluster,core) arenas for L1 allocator testing */
-#define L1_MEM_SIZE 4096u
-static uint8_t l1_mem[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)]
-                     [ARCH_NUM_CORE_PER_CLUSTER]
-                     [L1_MEM_SIZE];
-
-static inline uint32_t as_u32(const void *p) { return (uint32_t)(uintptr_t)p; }
+/* ---- L1 arenas ----
+ * Keep per-core arenas *inside* the cluster L1 window.
+ * Use the generated HEAP base if available, otherwise conservative fallback.
+ */
+#define L1_ARENA_SIZE    4096u   /* 4 KiB per core */
+#define L1_ARENA_STRIDE  4096u   /* simple 1:1 mapping */
 
 static void build_maps(void *base[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)]
                               [ARCH_NUM_CORE_PER_CLUSTER],
@@ -19,89 +18,91 @@ static void build_maps(void *base[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)]
                                     [ARCH_NUM_CORE_PER_CLUSTER],
                        uint32_t clusters, uint32_t cores)
 {
-  for (uint32_t c = 0; c < clusters; ++c)
+#ifdef ARCH_CLUSTER_HEAP_BASE
+  const uint32_t heap_base = ARCH_CLUSTER_HEAP_BASE;
+#else
+  const uint32_t heap_base = 0x00000100u;
+#endif
+  const uint32_t tcdm_size = ARCH_CLUSTER_TCDM_SIZE;
+
+  /* Optional: warn if someone grows 'cores' too much for this stride */
+  const uint32_t needed = heap_base + cores * L1_ARENA_STRIDE;
+  if (needed > tcdm_size && flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("[WARN] L1 arena plan exceeds TCDM; trimming may be required\n");
+  }
+
+  for (uint32_t c = 0; c < clusters; ++c) {
     for (uint32_t k = 0; k < cores; ++k) {
-      base[c][k] = (void*)&l1_mem[c][k][0];
-      size[c][k] = L1_MEM_SIZE;
+      const uint32_t off  = heap_base + k * L1_ARENA_STRIDE;
+      base[c][k] = (void*)(ARCH_CLUSTER_TCDM_BASE + off);
+      size[c][k] = L1_ARENA_SIZE;
     }
+  }
 }
 
-static void print_core_snapshot(int c, int k)
+static void print_sys(void)
 {
-  uint32_t n = soc_daml_get_core_free_count(c, k);
-  printf("[C%u-K%u] snapshot_count=%u\n", (unsigned)c, (unsigned)k, (unsigned)n);
-  uint32_t lim = (n > 8u) ? 8u : n;
-  for (uint32_t i = 0; i < lim; ++i) {
-    const daml_block_t *b = &soc_daml_get_core_free_list(c, k)[i];
-    printf("  #%u addr=0x%08x size=%u\n",
-           (unsigned)i, as_u32(b->addr), (unsigned)b->size);
+  if (flex_get_core_id()==0 && flex_get_cluster_id()==0) {
+    printf("[SystemInfo]: num_cluster_x = %d, num_cluster_y = %d\n",
+           ARCH_NUM_CLUSTER_X, ARCH_NUM_CLUSTER_Y);
+    printf("[BOOT] Using %dx%d clusters, %d cores/cluster\n",
+           ARCH_NUM_CLUSTER_X, ARCH_NUM_CLUSTER_Y, ARCH_NUM_CORE_PER_CLUSTER);
   }
-  if (n > lim) printf("  ... (%u more)\n", (unsigned)(n - lim));
-}
-
-static void print_cluster_common(int c)
-{
-  uint32_t n = soc_daml_get_cluster_common_count(c);
-  printf("[C%u] cluster_common=%u\n", (unsigned)c, (unsigned)n);
-  uint32_t lim = (n > 8u) ? 8u : n;
-  for (uint32_t i = 0; i < lim; ++i) {
-    const daml_block_t *b = &soc_daml_get_cluster_common(c)[i];
-    printf("  #%u addr=0x%08x size=%u\n",
-           (unsigned)i, as_u32(b->addr), (unsigned)b->size);
-  }
-  if (n > lim) printf("  ... (%u more)\n", (unsigned)(n - lim));
 }
 
 int main(void)
 {
   uint32_t eoc_val = 0;
 
+  /* Global init/barrier */
   flex_barrier_xy_init();
   flex_global_barrier_xy();
 
-  const uint32_t mesh_x   = ARCH_NUM_CLUSTER_X;
-  const uint32_t mesh_y   = ARCH_NUM_CLUSTER_Y;
-  const uint32_t clusters = mesh_x * mesh_y;           // e.g. 16
-  const uint32_t cores    = ARCH_NUM_CORE_PER_CLUSTER; // e.g. 3
+  print_sys();
+  flex_global_barrier_xy();
 
-  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
-    printf("[BOOT] Using %ux%u clusters, %u cores/cluster\n", mesh_x, mesh_y, cores);
-  }
-
+  const uint32_t clusters = ARCH_NUM_CLUSTER_X * ARCH_NUM_CLUSTER_Y;
+  const uint32_t cores    = ARCH_NUM_CORE_PER_CLUSTER;
   soc_daml_set_runtime_dims(clusters, cores);
 
-  static void *base_addrs[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)][ARCH_NUM_CORE_PER_CLUSTER];
-  static uint32_t sizes[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)][ARCH_NUM_CORE_PER_CLUSTER];
-
-  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+  if (flex_get_core_id()==0 && flex_get_cluster_id()==0) {
     printf("[BOOT] Building allocator maps...\n");
-    build_maps(base_addrs, sizes, clusters, cores);
+  }
+
+  /* Build L1 allocator base/size tables (L1 addresses) */
+  static void *base_addrs[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)]
+                         [ARCH_NUM_CORE_PER_CLUSTER];
+  static uint32_t sizes [(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)]
+                        [ARCH_NUM_CORE_PER_CLUSTER];
+  build_maps(base_addrs, sizes, clusters, cores);
+
+  flex_global_barrier_xy();
+  if (flex_get_core_id()==0 && flex_get_cluster_id()==0) {
     printf("[BOOT] Initializing allocators in HBM...\n");
-    soc_daml_init_allocators(base_addrs, sizes);
   }
-  flex_global_barrier_xy();
 
-  const int my_cid  = (int)flex_get_cluster_id();
-  const int my_core = (int)flex_get_core_id();
-  if (((unsigned)my_cid < clusters) && ((unsigned)my_core < cores)) {
-    soc_daml_upload_free_list(my_cid, my_core);
-  }
-  flex_global_barrier_xy();
+  /* Initialize allocators (their state structures live in HBM) */
+  soc_daml_init_allocators(base_addrs, sizes);
 
-  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
-    printf("\n=== Phase 1: Per-core snapshots ===\n");
-    for (uint32_t c = 0; c < clusters; ++c)
-      for (uint32_t k = 0; k < cores; ++k)
-        print_core_snapshot((int)c,(int)k);
-  }
+  /* Upload each core’s initial free list snapshot */
   flex_global_barrier_xy();
-
-  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
-    printf("\n=== Phase 2: Cluster-wide intersections ===\n");
-    for (uint32_t c = 0; c < clusters; ++c) {
-      soc_daml_build_cluster_common((int)c);
-      print_cluster_common((int)c);
+  for (uint32_t c = 0; c < clusters; ++c) {
+    for (uint32_t k = 0; k < cores; ++k) {
+      if (flex_get_cluster_id() == (int)c && flex_get_core_id() == (int)k) {
+        soc_daml_upload_free_list(c, k);
+      }
+      flex_intra_cluster_sync();   /* keep tight and deterministic */
     }
+    flex_global_barrier_xy();
+  }
+
+  /* Build cluster/system intersections once */
+  if (flex_get_core_id()==0) {
+    soc_daml_build_cluster_common(flex_get_cluster_id());
+  }
+  flex_global_barrier_xy();
+  if (flex_get_cluster_id()==0 && flex_get_core_id()==0) {
+    soc_daml_build_system_common();
   }
   flex_global_barrier_xy();
 
