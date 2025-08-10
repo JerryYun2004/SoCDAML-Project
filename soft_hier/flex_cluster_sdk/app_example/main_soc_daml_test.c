@@ -1,234 +1,159 @@
 #include "flex_runtime.h"
+#include "flex_cluster_arch.h"   // ARCH_NUM_CLUSTER_X/Y and ARCH_NUM_CORE_PER_CLUSTER
 #include "flex_alloc.h"
 #include "soc_daml.h"
 #include <stdint.h>
 #include <stdio.h>
 
-/* ------------------------------------------------------------
- *               Test L1 regions for each core
- * ------------------------------------------------------------
- * We build two scenarios to demonstrate intersections:
- *
- *  - Cluster 0: all cores share ONE backing buffer (no mutations),
- *               so right after init the cluster-wide intersection
- *               is NON-EMPTY (the single full-span free block).
- *               We then DO NOT allocate on cluster 0 to avoid
- *               corrupting the shared free-list owned by two allocators.
- *
- *  - Cluster 1: each core has its OWN backing buffer and performs
- *               independent allocations/frees, then uploads snapshots.
- *               This often yields an EMPTY intersection (as expected),
- *               which we print to demonstrate correctness.
- *
- * NOTE: This is purely for testing the metadata flow (P1).
- *       In real use, each core/cluster should have its own L1 region.
- * ------------------------------------------------------------ */
+/* ————————————————————————————————————————————————
+   Simple local L1 arenas per (cluster, core) for testing
+   (kept small so the ELF stays light)
+   ———————————————————————————————————————————————— */
+#define L1_MEM_SIZE 4096u
+static uint8_t l1_mem[ (ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y) ]
+                     [ ARCH_NUM_CORE_PER_CLUSTER ]
+                     [ L1_MEM_SIZE ];
 
-#ifndef L1_MEM_SIZE
-#define L1_MEM_SIZE  4096u
-#endif
+/* Helper: print pointers as 32-bit for readability */
+static inline uint32_t as_u32(const void *p){ return (uint32_t)(uintptr_t)p; }
 
-/* Shared buffer for ALL cores in cluster 0 (to force a non-empty intersection at init) */
-static uint8_t l1_mem_c0_shared[L1_MEM_SIZE];
-
-/* Separate buffers for cluster 1 cores (change sizes by core to make lists different) */
-static uint8_t l1_mem_c1_core0[L1_MEM_SIZE];
-static uint8_t l1_mem_c1_core1[L1_MEM_SIZE];
-/* If you have more than 2 cores per cluster, add more buffers or reuse pattern as needed. */
-
-/* Helper: safe cast pointer to 32-bit for printing */
-static uint32_t as_u32(const void *p) { return (uint32_t)(uintptr_t)p; }
-
-/* Helper: tiny loop (no memset) to fill base_addrs/sizes */
-static void build_allocator_maps(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER],
-                                 uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER]) {
-  uint32_t c, core;
-  for (c = 0; c < NUM_CLUSTERS; ++c) {
-    for (core = 0; core < CORES_PER_CLUSTER; ++core) {
-      /* Default: point to unique per-(c,core) region; we override some below. */
-      base_addrs[c][core] = 0;
-      sizes[c][core] = L1_MEM_SIZE;
-    }
-  }
-
-  /* Cluster 0: force SAME base for all cores (non-empty intersection after init) */
-  for (core = 0; core < CORES_PER_CLUSTER; ++core) {
-    base_addrs[0][core] = (void *)l1_mem_c0_shared;
-  }
-
-  /* Cluster 1: distinct bases per core (show empty/variable intersections) */
-  if (NUM_CLUSTERS > 1) {
-    base_addrs[1][0] = (void *)l1_mem_c1_core0;
-    if (CORES_PER_CLUSTER > 1) base_addrs[1][1] = (void *)l1_mem_c1_core1;
-    /* For cores >=2, just reuse core0’s buffer pattern (still distinct from core1 if needed) */
-    for (core = 2; core < CORES_PER_CLUSTER; ++core) {
-      base_addrs[1][core] = (void *)l1_mem_c1_core0;
+/* Fill allocator maps (no memset; plain loops only) */
+static void build_maps(void *base[][ARCH_NUM_CORE_PER_CLUSTER],
+                       uint32_t size[][ARCH_NUM_CORE_PER_CLUSTER],
+                       uint32_t num_clusters, uint32_t cores_per_cluster)
+{
+  for (uint32_t c = 0; c < num_clusters; ++c) {
+    for (uint32_t k = 0; k < cores_per_cluster; ++k) {
+      base[c][k] = (void*)&l1_mem[c][k][0];
+      size[c][k] = L1_MEM_SIZE;
     }
   }
 }
 
-/* Pretty-print: a single core’s uploaded snapshot */
-static void print_core_snapshot(int c, int core) {
-  uint32_t n = soc_daml_get_core_free_count(c, core);
-  printf("[C%u-K%u] snapshot count = %u\n", (unsigned)c, (unsigned)core, (unsigned)n);
-  /* print a few entries (limit to avoid long logs) */
-  uint32_t limit = n;
-  if (limit > 8u) limit = 8u;
-  for (uint32_t i = 0; i < limit; ++i) {
-    const daml_block_t *blk = &soc_daml_get_core_free_list(c, core)[i];
-    printf("  [C%u-K%u]  #%u  addr=0x%08x  size=%u\n",
-           (unsigned)c, (unsigned)core, (unsigned)i,
-           as_u32(blk->addr), (unsigned)blk->size);
+/* Pretty-print helpers (concise, like main.c style) */
+static void print_core_snapshot(int c,int k){
+  uint32_t n = soc_daml_get_core_free_count(c,k);
+  printf("[C%u-K%u] snapshot_count=%u\n",(unsigned)c,(unsigned)k,(unsigned)n);
+  uint32_t lim = (n > 8u) ? 8u : n;
+  for (uint32_t i = 0; i < lim; ++i) {
+    const daml_block_t *b = &soc_daml_get_core_free_list(c,k)[i];
+    printf("  #%u addr=0x%08x size=%u\n",(unsigned)i, as_u32(b->addr), (unsigned)b->size);
   }
-  if (n > limit) {
-    printf("  ... (%u more)\n", (unsigned)(n - limit));
-  }
+  if (n > lim) printf("  ... (%u more)\n",(unsigned)(n - lim));
 }
 
-/* Pretty-print: cluster-wide intersection */
-static void print_cluster_common(int c) {
+static void print_cluster_common(int c){
   uint32_t n = soc_daml_get_cluster_common_count(c);
-  printf("[C%u] cluster-common count = %u\n", (unsigned)c, (unsigned)n);
-  uint32_t limit = n;
-  if (limit > 8u) limit = 8u;
-  for (uint32_t i = 0; i < limit; ++i) {
-    const daml_block_t *blk = &soc_daml_get_cluster_common(c)[i];
-    printf("  [C%u]  #%u  addr=0x%08x  size=%u\n",
-           (unsigned)c, (unsigned)i, as_u32(blk->addr), (unsigned)blk->size);
+  printf("[C%u] cluster_common=%u\n",(unsigned)c,(unsigned)n);
+  uint32_t lim = (n > 8u) ? 8u : n;
+  for (uint32_t i = 0; i < lim; ++i) {
+    const daml_block_t *b = &soc_daml_get_cluster_common(c)[i];
+    printf("  #%u addr=0x%08x size=%u\n",(unsigned)i, as_u32(b->addr), (unsigned)b->size);
   }
-  if (n > limit) {
-    printf("  ... (%u more)\n", (unsigned)(n - limit));
-  }
-}
-
-/* Pretty-print: system-wide intersection */
-static void print_system_common(void) {
-  uint32_t n = soc_daml_get_system_common_count();
-  printf("[SYS] system-common count = %u\n", (unsigned)n);
-  uint32_t limit = n;
-  if (limit > 8u) limit = 8u;
-  for (uint32_t i = 0; i < limit; ++i) {
-    const daml_block_t *blk = &soc_daml_get_system_common()[i];
-    printf("  [SYS] #%u  addr=0x%08x  size=%u\n",
-           (unsigned)i, as_u32(blk->addr), (unsigned)blk->size);
-  }
-  if (n > limit) {
-    printf("  ... (%u more)\n", (unsigned)(n - limit));
-  }
+  if (n > lim) printf("  ... (%u more)\n",(unsigned)(n - lim));
 }
 
 int main(void)
 {
   uint32_t eoc_val = 0;
 
-  /* Standard runtime framing (match main.c style) */
+  /* Match example main.c style: init + global barrier */
   flex_barrier_xy_init();
   flex_global_barrier_xy();
-  if (flex_get_core_id() == 0 && flex_get_cluster_id() == 0) flex_timer_start();
 
   /**************************************/
   /*  Program Execution Region -- Start */
   /**************************************/
 
-  int my_cid  = (int)flex_get_cluster_id();
-  int my_core = (int)flex_get_core_id();
+  const uint32_t mesh_x   = ARCH_NUM_CLUSTER_X;
+  const uint32_t mesh_y   = ARCH_NUM_CLUSTER_Y;
+  const uint32_t clusters = mesh_x * mesh_y;
+  const uint32_t cores    = ARCH_NUM_CORE_PER_CLUSTER;
 
-  /* Build maps for allocators (same view on all cores) */
-  static void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER];
-  static uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER];
-  if (my_cid == 0 && my_core == 0) {
+  /* Let soc_daml know the actual runtime dims (e.g., 4x4x3) */
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("[BOOT] Using %ux%u clusters, %u cores/cluster\n",
+           mesh_x, mesh_y, cores);
+  }
+  soc_daml_set_runtime_dims(clusters, cores);
+
+  /* Build allocator maps and init HBM-visible allocator mirrors */
+  static void *base_addrs[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)][ARCH_NUM_CORE_PER_CLUSTER];
+  static uint32_t sizes[(ARCH_NUM_CLUSTER_X*ARCH_NUM_CLUSTER_Y)][ARCH_NUM_CORE_PER_CLUSTER];
+
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
     printf("[BOOT] Building allocator maps...\n");
-    build_allocator_maps(base_addrs, sizes);
-  }
-
-  flex_global_barrier_xy();
-
-  /* Initialize allocators ONCE (Core-0 of Cluster-0), then sync */
-  if (my_cid == 0 && my_core == 0) {
-    printf("[BOOT] Initializing allocators in HBM...\n");
+    build_maps(base_addrs, sizes, clusters, cores);
+    printf("[BOOT] Initializing allocators...\n");
     soc_daml_init_allocators(base_addrs, sizes);
-    printf("[BOOT] Done init. Base C0 all-cores share buffer at 0x%08x; C1 cores have distinct buffers.\n",
-           as_u32(base_addrs[0][0]));
   }
   flex_global_barrier_xy();
 
-  /* Phase 1: each core uploads its own free-list snapshot */
+  /* Each core uploads its own L1 free-list snapshot to HBM */
+  const int my_cid  = (int)flex_get_cluster_id();
+  const int my_core = (int)flex_get_core_id();
   soc_daml_upload_free_list(my_cid, my_core);
   flex_global_barrier_xy();
 
-  /* Master prints snapshots for ALL cores */
+  /* Master prints snapshots for all participants */
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("\n=== Phase 1: Per-core snapshots ===\n");
+    for (uint32_t c = 0; c < clusters; ++c)
+      for (uint32_t k = 0; k < cores; ++k)
+        print_core_snapshot((int)c,(int)k);
+  }
+  flex_global_barrier_xy();
+
+  /* Build cluster-wide intersections from published snapshots */
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("\n=== Phase 2: Cluster-wide intersections ===\n");
+    for (uint32_t c = 0; c < clusters; ++c) {
+      soc_daml_build_cluster_common((int)c);
+      print_cluster_common((int)c);
+    }
+  }
+  flex_global_barrier_xy();
+
+  /* Mutate allocator on a single core to demonstrate change + re-snapshot */
   if (my_cid == 0 && my_core == 0) {
-    printf("\n=== Phase 1: Initial per-core snapshots (post-init) ===\n");
-    for (int c = 0; c < NUM_CLUSTERS; ++c) {
-      for (int k = 0; k < CORES_PER_CLUSTER; ++k) {
-        print_core_snapshot(c, k);
-      }
+    printf("\n[C0-K0] alloc 128, then 96; free first; re-snapshot\n");
+    void *p0 = flex_l1_block_alloc(0,0,128u);   /* wrapper locks + fences + snapshot */
+    void *p1 = flex_l1_block_alloc(0,0,96u);
+    printf("[C0-K0] p0=0x%08x p1=0x%08x\n", as_u32(p0), as_u32(p1));
+    if (p0) flex_l1_block_free(0,0,p0);         /* wrapper locks + fences + snapshot */
+  }
+  flex_global_barrier_xy();
+
+  /* Rebuild intersections after mutation */
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("\n=== Phase 3: Intersections after mutations ===\n");
+    for (uint32_t c = 0; c < clusters; ++c) {
+      soc_daml_build_cluster_common((int)c);
+      print_cluster_common((int)c);
     }
   }
   flex_global_barrier_xy();
 
-  /* Build & print cluster-wide intersections from snapshots */
-  if (my_cid == 0 && my_core == 0) {
-    printf("\n=== Phase 2: Build cluster-wide intersections ===\n");
-    for (int c = 0; c < NUM_CLUSTERS; ++c) {
-      printf("[C%u] Building cluster-common...\n", (unsigned)c);
-      soc_daml_build_cluster_common(c);
-      print_cluster_common(c);
+  /* HBM sanity: allocate, write, read, free (no compact calls) */
+  if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+    printf("\n=== HBM: alloc->write->read->free ===\n");
+    void *h = flex_hbm_malloc(64u);
+    printf("[HBM] alloc 64 -> 0x%08x\n", as_u32(h));
+    if (h) {
+      volatile uint8_t *q = (volatile uint8_t*)h;
+      /* write pattern */
+      for (uint32_t i = 0; i < 64u; ++i) q[i] = (uint8_t)i;
+      /* verify */
+      uint32_t ok = 1u;
+      for (uint32_t i = 0; i < 64u; ++i) { if (q[i] != (uint8_t)i) { ok = 0u; break; } }
+      printf("[HBM] verify=%s\n", ok ? "OK" : "FAIL");
+      flex_hbm_free((void*)h);
     }
   }
-  flex_global_barrier_xy();
-
-  /* Phase 3: Mutate ONLY Cluster 1 allocators (avoid touching C0 shared buffer) */
-  if (NUM_CLUSTERS > 1) {
-    if (my_cid == 1) {
-      /* Use wrappers that lock + fence + refresh snapshot */
-      uint32_t alloc_sz_a = 128u + (uint32_t)(my_core * 64u);
-      uint32_t alloc_sz_b = 96u;
-      void *p0 = 0;
-      void *p1 = 0;
-
-      printf("[C%u-K%u] Allocating %u bytes...\n",
-             (unsigned)my_cid, (unsigned)my_core, (unsigned)alloc_sz_a);
-      p0 = flex_l1_block_alloc(my_cid, my_core, alloc_sz_a);
-      printf("[C%u-K%u]   -> ptr 0x%08x\n", (unsigned)my_cid, (unsigned)my_core, as_u32(p0));
-
-      printf("[C%u-K%u] Allocating %u bytes...\n",
-             (unsigned)my_cid, (unsigned)my_core, (unsigned)alloc_sz_b);
-      p1 = flex_l1_block_alloc(my_cid, my_core, alloc_sz_b);
-      printf("[C%u-K%u]   -> ptr 0x%08x\n", (unsigned)my_cid, (unsigned)my_core, as_u32(p1));
-
-      /* Free one block to change shape and re-upload snapshot */
-      if (p0) {
-        printf("[C%u-K%u] Freeing first block...\n", (unsigned)my_cid, (unsigned)my_core);
-        flex_l1_block_free(my_cid, my_core, p0);
-      }
-
-      /* Snapshot refreshed by wrappers; print my own snapshot */
-      print_core_snapshot(my_cid, my_core);
-    }
-  }
-  flex_global_barrier_xy();
-
-  /* Phase 4: Rebuild intersections after mutations on Cluster 1 */
-  if (my_cid == 0 && my_core == 0) {
-    printf("\n=== Phase 4: Rebuild intersections after C1 mutations ===\n");
-    for (int c = 0; c < NUM_CLUSTERS; ++c) {
-      printf("[C%u] Rebuilding cluster-common...\n", (unsigned)c);
-      soc_daml_build_cluster_common(c);
-      print_cluster_common(c);
-    }
-
-    /* Optional system-wide intersection (will likely be zero) */
-    printf("[SYS] Building system-common...\n");
-    soc_daml_build_system_common();
-    print_system_common();
-  }
-  flex_global_barrier_xy();
 
   /**************************************/
   /*  Program Execution Region -- Stop  */
   /**************************************/
-  if (flex_get_core_id() == 0 && flex_get_cluster_id() == 0) flex_timer_end();
   flex_global_barrier_xy();
   flex_eoc(eoc_val);
   return 0;
