@@ -1,21 +1,10 @@
 #include "flex_runtime.h"
 #include "flex_printf.h"
-/* keep headers tight to avoid pulling helpers that may contain `ebreak` */
+#include "flex_dma_pattern.h"
+#include "flex_group_barrier.h"
 #include "soc_daml.h"
 
-/* ------------------------------------------------------------
- * No-break shims (avoid linking helpers that might embed `ebreak`)
- * ------------------------------------------------------------ */
-static inline void nb_timer_start(void) { /* no-op */ }
-static inline void nb_timer_end(void)   { /* no-op */ }
-static inline void nb_eoc(uint32_t v) {
-    volatile uint32_t *EOC = (volatile uint32_t *)ARCH_SOC_REGISTER_EOC;
-    *EOC = v; /* signal end-of-computation to the SoC without any trap */
-}
-
-/* ------------------------------------------------------------
- * Clean ordered prints so we can read logs
- * ------------------------------------------------------------ */
+/* Clean ordered prints so we can read logs */
 static void hello_ordered_all(void)
 {
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
@@ -100,7 +89,7 @@ int main(void)
     static void *base_addrs[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
     static uint32_t sizes[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
 
-    /* Identical partitioning on every cluster (same L1 layout) */
+    /* We use identical partitioning on every cluster (same L1 layout) */
     const uint32_t HEAP_BASE = ARCH_CLUSTER_HEAP_BASE;
     const uint32_t HEAP_END  = ARCH_CLUSTER_HEAP_END;
     const uint32_t L1_SIZE   = (HEAP_END - HEAP_BASE);
@@ -169,7 +158,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* Show the head block we will intersect (sanity) */
+    /* Show the head block we will intersect (nice sanity check) */
     dump_first_free_blocks();
     flex_global_barrier_xy();
 
@@ -187,14 +176,33 @@ int main(void)
     /* Ordered hello to show progress is clean */
     hello_ordered_all();
 
-    /* Use no-break timer shims instead of library helpers */
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
-        nb_timer_start();
-        nb_timer_end();
+        flex_timer_start();
+        flex_timer_end();
     }
     flex_global_barrier_xy();
 
-    /* Use no-break EOC */
-    nb_eoc(eoc_val);
+    flex_eoc(eoc_val);
     return 0;
 }
+
+/* ============================================================
+ *                 NO-BREAK SHIMS (no semihosting)
+ * Provide strong symbols so the linker won’t pull in the
+ * semihosting/newlib versions that contain 'ebreak'.
+ * ============================================================ */
+__attribute__((weak, noreturn)) void abort(void)               { for (;;){ } }
+__attribute__((weak, noreturn)) void __assert_fail(const char*,
+                                                   const char*,
+                                                   unsigned int,
+                                                   const char*) { for (;;){ } }
+__attribute__((weak, noreturn)) void __stack_chk_fail(void)    { for (;;){ } }
+__attribute__((weak, noreturn)) void _exit(int x)              { (void)x; for (;;){ } }
+
+/* Some runtimes call into these; make them harmless. */
+__attribute__((weak)) int raise(int sig)            { (void)sig; return 0; }
+__attribute__((weak)) int kill(int pid, int sig)    { (void)pid; (void)sig; return 0; }
+__attribute__((weak)) int getpid(void)              { return 1; }
+
+/* Optional C++ pure-virtual guard (even if you don't use C++). */
+__attribute__((weak)) void __cxa_pure_virtual(void) { for (;;){ } }
