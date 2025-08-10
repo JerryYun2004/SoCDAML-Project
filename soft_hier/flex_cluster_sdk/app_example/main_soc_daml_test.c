@@ -77,17 +77,21 @@ int main(void)
     flex_barrier_xy_init();
 
     if (flex_is_first_core() && flex_get_cluster_id() == 0) {
-        /* Wakeup registers: X and Y cluster masks live at
-           ARCH_SOC_REGISTER_WAKEUP + 0x8 and +0xC respectively.
-           We set bits [0..NX-1] and [0..NY-1]. */
-        volatile uint32_t * const wake = (volatile uint32_t*)ARCH_SOC_REGISTER_WAKEUP;
-        const uint32_t mask_x = (ARCH_NUM_CLUSTER_X >= 32) ? 0xFFFFFFFFu
-                                                           : ((1u << ARCH_NUM_CLUSTER_X) - 1u);
-        const uint32_t mask_y = (ARCH_NUM_CLUSTER_Y >= 32) ? 0xFFFFFFFFu
-                                                           : ((1u << ARCH_NUM_CLUSTER_Y) - 1u);
-        wake[2] = mask_x;  /* +0x08 */
-        wake[3] = mask_y;  /* +0x0C */
+        /* Restore the *exact* wake sequence from your strict implementation:
+           - Read the hardware-provided mask from ARCH_CLUSTER_REG_BASE + 0x4
+           - Mirror it into ARCH_SOC_REGISTER_WAKEUP + 0x8 and +0xC
+         */
+        volatile uint32_t * const cluster_regs = (volatile uint32_t *)ARCH_CLUSTER_REG_BASE;
+        volatile uint32_t * const wake         = (volatile uint32_t *)ARCH_SOC_REGISTER_WAKEUP;
+
+        const uint32_t hw_mask = cluster_regs[1];   /* offset +0x4 */
+
+        wake[2] = hw_mask;   /* +0x08 */
+        wake[3] = hw_mask;   /* +0x0C */
         __sync_synchronize();
+
+        /* Tiny settle loop to let wake propagate before the barrier */
+        for (volatile int i = 0; i < 256; ++i) { __asm__ __volatile__("nop"); }
     }
 
     /* Now it is safe to use a mesh-wide barrier */
@@ -108,7 +112,6 @@ int main(void)
     static void *base_addrs[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
     static uint32_t sizes[ARCH_NUM_CLUSTER][ARCH_NUM_CORE_PER_CLUSTER];
 
-    /* We use identical partitioning on every cluster (same L1 layout) */
     const uint32_t HEAP_BASE = ARCH_CLUSTER_HEAP_BASE;
     const uint32_t HEAP_END  = ARCH_CLUSTER_HEAP_END;
     const uint32_t L1_SIZE   = (HEAP_END - HEAP_BASE);
