@@ -107,7 +107,7 @@ static inline void daml_fence(void) { __sync_synchronize(); }
 static inline int daml_block_eq(const daml_block_t *a, const daml_block_t *b) {
   return (a->addr == b->addr) && (a->size == b->size);
 }
-static int daml_contains(const daml_block_t *list, uint32_t n, const daml_block_t *x) {
+static inline int daml_contains(const daml_block_t *list, uint32_t n, const daml_block_t *x) {
   for (uint32_t i = 0; i < n; ++i) if (daml_block_eq(&list[i], x)) return 1;
   return 0;
 }
