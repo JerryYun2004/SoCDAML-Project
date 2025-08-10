@@ -1,77 +1,78 @@
 #pragma once
 /*
- * soc_daml.h  —  SoftHier runtime extensions for P1
+ * soc_daml.h — SoftHier P1 runtime (HBM-visible allocation metadata)
  *
- * Features:
- *  - Per-core upload of L1 free-list snapshots to HBM
- *  - Cluster-wide & system-wide intersection of free blocks
- *  - No compact libc calls (no memset/memcpy/…)
- *  - Plain C spinlocks + memory fences for GVSoC
- *
- * External dependencies:
- *   - flex_alloc.h for alloc_t / alloc_block_t and domain_malloc/domain_free/flex_cluster_alloc_init
+ * - Derives cluster/core dimensions from flex_cluster_arch.h (generated from arch.py)
+ * - Per-core upload of L1 free-list snapshots into HBM
+ * - Cluster-wide + system-wide intersections (free in ALL cores[/clusters])
+ * - No compact libc calls (no memset/memcpy/etc.)
  */
 
 #include <stdint.h>
 #include <stddef.h>
-#include "flex_alloc.h"   // project allocator API: alloc_t, alloc_block_t, flex_cluster_alloc_init(), domain_malloc(), domain_free()
+#include "flex_cluster_arch.h"  // generated from flex_cluster_arch.py
+#include "flex_alloc.h"         // alloc_t, alloc_block_t, flex_cluster_alloc_init(), domain_malloc(), domain_free()
 
 /* ------------------------------------------------------------
- *               Tunables (set to your platform)
+ *                 Dimensions (from platform config)
  * ------------------------------------------------------------ */
-#ifndef NUM_CLUSTERS
-#define NUM_CLUSTERS            2
+/* Build-time caps come from generated macros */
+#ifndef ARCH_NUM_CLUSTER_X
+#error "ARCH_NUM_CLUSTER_X not defined. Include the generated flex_cluster_arch.h"
+#endif
+#ifndef ARCH_NUM_CLUSTER_Y
+#error "ARCH_NUM_CLUSTER_Y not defined. Include the generated flex_cluster_arch.h"
+#endif
+#ifndef ARCH_NUM_CORE_PER_CLUSTER
+#error "ARCH_NUM_CORE_PER_CLUSTER not defined. Include the generated flex_cluster_arch.h"
 #endif
 
-#ifndef CORES_PER_CLUSTER
-#define CORES_PER_CLUSTER       8
-#endif
+/* Statically sized arrays sized for the *maximum* mesh we build for */
+#define NUM_CLUSTER_X        (ARCH_NUM_CLUSTER_X)
+#define NUM_CLUSTER_Y        (ARCH_NUM_CLUSTER_Y)
+#define NUM_CLUSTERS         ((NUM_CLUSTER_X) * (NUM_CLUSTER_Y))
+#define CORES_PER_CLUSTER    (ARCH_NUM_CORE_PER_CLUSTER)
 
+/* Tweak these if you expect longer free lists or more results */
 #ifndef MAX_FREE_BLOCKS_PER_CORE
-#define MAX_FREE_BLOCKS_PER_CORE 128
+#define MAX_FREE_BLOCKS_PER_CORE  128u
 #endif
-
 #ifndef MAX_COMMON_BLOCKS
-#define MAX_COMMON_BLOCKS       128
+#define MAX_COMMON_BLOCKS         128u
 #endif
 
 /* ------------------------------------------------------------
- *                   Types (HBM metadata)
+ *                         Types
  * ------------------------------------------------------------ */
 typedef struct {
-  void    *addr;     /* start address of the free block (block header address) */
-  uint32_t size;     /* size in bytes of the free block */
+  void    *addr;   /* start address of the free block (block header address) */
+  uint32_t size;   /* size in bytes of the free block */
 } daml_block_t;
 
 /* ------------------------------------------------------------
- *                HBM-resident global structures
+ *               HBM-resident global state (metadata)
  * ------------------------------------------------------------ */
-/* Per-core L1 allocators (mirror / manager-owned instances) */
 __attribute__((section(".hbm")))
 alloc_t g_hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
-/* Per-(cluster,core) free-list snapshots */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_core_free[NUM_CLUSTERS][CORES_PER_CLUSTER][MAX_FREE_BLOCKS_PER_CORE];
 
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_core_free_count[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
-/* Per-cluster: blocks free in ALL cores of the cluster */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_cluster_common[NUM_CLUSTERS][MAX_COMMON_BLOCKS];
 
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_cluster_common_count[NUM_CLUSTERS];
 
-/* System-wide: blocks free in ALL cores of ALL clusters */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_system_common[MAX_COMMON_BLOCKS];
 
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_system_common_count;
 
-/* Locks (HBM) */
 __attribute__((section(".hbm")))
 volatile int g_cluster_lock[NUM_CLUSTERS];
 
@@ -79,14 +80,33 @@ __attribute__((section(".hbm")))
 volatile int g_global_lock;
 
 /* ------------------------------------------------------------
- *                        Tiny utilities
+ *           Runtime dimensions (for safe bounds/iteration)
+ * ------------------------------------------------------------ */
+/* These are set at runtime by main() using the generated macros;
+ * they let us iterate exactly the instantiated mesh size (and
+ * skip out-of-range clusters/cores safely if someone changes the config). */
+__attribute__((section(".hbm")))
+static volatile uint32_t g_rt_num_clusters = NUM_CLUSTERS;
+
+__attribute__((section(".hbm")))
+static volatile uint32_t g_rt_cores_per_cluster = CORES_PER_CLUSTER;
+
+static inline void soc_daml_set_runtime_dims(uint32_t num_clusters,
+                                             uint32_t cores_per_cluster)
+{
+  g_rt_num_clusters      = (num_clusters  <= NUM_CLUSTERS)      ? num_clusters      : NUM_CLUSTERS;
+  g_rt_cores_per_cluster = (cores_per_cluster <= CORES_PER_CLUSTER) ? cores_per_cluster : CORES_PER_CLUSTER;
+}
+
+/* ------------------------------------------------------------
+ *                     Tiny utils (no libc)
  * ------------------------------------------------------------ */
 static inline void daml_zero_u32(volatile uint32_t *p, uint32_t n) {
-  uint32_t i; for (i = 0; i < n; ++i) p[i] = 0u;
+  for (uint32_t i = 0; i < n; ++i) p[i] = 0u;
 }
 static inline void daml_zero_bytes(volatile void *ptr, uint32_t n) {
-  volatile uint8_t *q = (volatile uint8_t *)ptr;
-  uint32_t i; for (i = 0; i < n; ++i) q[i] = 0u;
+  volatile uint8_t *q = (volatile uint8_t*)ptr;
+  for (uint32_t i = 0; i < n; ++i) q[i] = 0u;
 }
 static inline void daml_fence(void) { __sync_synchronize(); }
 
@@ -94,7 +114,7 @@ static inline int daml_block_eq(const daml_block_t *a, const daml_block_t *b) {
   return (a->addr == b->addr) && (a->size == b->size);
 }
 static int daml_contains(const daml_block_t *list, uint32_t n, const daml_block_t *x) {
-  uint32_t i; for (i = 0; i < n; ++i) if (daml_block_eq(&list[i], x)) return 1;
+  for (uint32_t i = 0; i < n; ++i) if (daml_block_eq(&list[i], x)) return 1;
   return 0;
 }
 
@@ -115,55 +135,61 @@ static inline void daml_unlock_global(void) {
 }
 
 /* ------------------------------------------------------------
- *              API: initialization (allocators + HBM)
+ *               Bounds guards (use runtime dims)
  * ------------------------------------------------------------ */
-/* Initialize per-core allocators and clear all HBM metadata. */
-static inline void soc_daml_init_allocators(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER],
-                                            uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER]) {
-  uint32_t c, core;
+static inline int daml_in_bounds_cluster(int cid) {
+  return ((unsigned)cid < NUM_CLUSTERS) && ((unsigned)cid < g_rt_num_clusters);
+}
+static inline int daml_in_bounds_cc(int cid, int core) {
+  return ((unsigned)cid  < NUM_CLUSTERS)         &&
+         ((unsigned)core < CORES_PER_CLUSTER)    &&
+         ((unsigned)cid  < g_rt_num_clusters)    &&
+         ((unsigned)core < g_rt_cores_per_cluster);
+}
 
-  for (c = 0; c < NUM_CLUSTERS; ++c) {
-    for (core = 0; core < CORES_PER_CLUSTER; ++core) {
-      /* Initialize allocator (from flex_alloc.h) */
-      flex_cluster_alloc_init(&g_hbm_l1_allocators[c][core],
-                              base_addrs[c][core],
-                              sizes[c][core]);
+/* ------------------------------------------------------------
+ *                 Initialization (allocators + HBM)
+ * ------------------------------------------------------------ */
+/* Pass per-(cluster,core) base+size for L1 allocators.
+ * Note: allocator/free-list shape defined in flex_alloc.h (node at block start).  */
+static inline void soc_daml_init_allocators(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER],
+                                            uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER])
+{
+  for (uint32_t c = 0; c < NUM_CLUSTERS; ++c) {
+    for (uint32_t k = 0; k < CORES_PER_CLUSTER; ++k) {
+      flex_cluster_alloc_init(&g_hbm_l1_allocators[c][k], base_addrs[c][k], sizes[c][k]);  /* from flex_alloc.h */
     }
   }
 
-  /* Clear locks and metadata (no memset) */
-  for (c = 0; c < NUM_CLUSTERS; ++c) {
+  for (uint32_t c = 0; c < NUM_CLUSTERS; ++c) {
     g_cluster_lock[c] = 0;
     g_hbm_cluster_common_count[c] = 0u;
     daml_zero_bytes(&g_hbm_cluster_common[c][0], (uint32_t)sizeof(g_hbm_cluster_common[c]));
-    for (core = 0; core < CORES_PER_CLUSTER; ++core) {
-      g_hbm_core_free_count[c][core] = 0u;
-      daml_zero_bytes(&g_hbm_core_free[c][core][0], (uint32_t)sizeof(g_hbm_core_free[c][core]));
+    for (uint32_t k = 0; k < CORES_PER_CLUSTER; ++k) {
+      g_hbm_core_free_count[c][k] = 0u;
+      daml_zero_bytes(&g_hbm_core_free[c][k][0], (uint32_t)sizeof(g_hbm_core_free[c][k]));
     }
   }
   g_global_lock = 0;
   g_hbm_system_common_count = 0u;
   daml_zero_bytes(&g_hbm_system_common[0], (uint32_t)sizeof(g_hbm_system_common));
-  daml_fence(); /* publish zeros */
+  daml_fence();  /* publish zeros */
 }
 
 /* ------------------------------------------------------------
- *              API: per-core snapshot upload (P1)
+ *                Per-core snapshot upload (P1)
  * ------------------------------------------------------------ */
-/*
- * Walk the local allocator free-list of (cluster_id, core_id) and
- * publish (addr,size) pairs into HBM.
- * Requires: g_hbm_l1_allocators[...] reflects the allocator used.
- */
-static inline void soc_daml_upload_free_list(int cluster_id, int core_id) {
+static inline void soc_daml_upload_free_list(int cluster_id, int core_id)
+{
+  if (!daml_in_bounds_cc(cluster_id, core_id)) return;
+
   alloc_t       *alloc = &g_hbm_l1_allocators[cluster_id][core_id];
-  alloc_block_t *curr  = alloc->first_block;
+  alloc_block_t *curr  = alloc->first_block;   /* free list head (in L1) */
   uint32_t count = 0u;
 
   daml_lock_cluster(cluster_id);
 
-  /* reset count first; readers will see 0 until table is ready */
-  g_hbm_core_free_count[cluster_id][core_id] = 0u;
+  g_hbm_core_free_count[cluster_id][core_id] = 0u;  /* readers see empty until table is ready */
   daml_fence();
 
   while (curr && (count < MAX_FREE_BLOCKS_PER_CORE)) {
@@ -173,18 +199,19 @@ static inline void soc_daml_upload_free_list(int cluster_id, int core_id) {
     count += 1u;
   }
 
-  /* publish table contents before making count visible */
-  daml_fence();
+  daml_fence();  /* publish entries before count */
   g_hbm_core_free_count[cluster_id][core_id] = count;
 
   daml_unlock_cluster(cluster_id);
 }
 
 /* ------------------------------------------------------------
- *           API: cluster-wide intersection builder (P1)
+ *            Cluster-wide intersection (free in ALL cores)
  * ------------------------------------------------------------ */
-/* Find blocks free in ALL cores within cluster_id using the per-core HBM snapshots. */
-static inline void soc_daml_build_cluster_common(int cluster_id) {
+static inline void soc_daml_build_cluster_common(int cluster_id)
+{
+  if (!daml_in_bounds_cluster(cluster_id)) return;
+
   uint32_t out_cnt = 0u;
 
   daml_lock_cluster(cluster_id);
@@ -192,18 +219,17 @@ static inline void soc_daml_build_cluster_common(int cluster_id) {
   g_hbm_cluster_common_count[cluster_id] = 0u;
   daml_fence();
 
-  /* Use core 0’s snapshot as reference */
   const daml_block_t *ref   = &g_hbm_core_free[cluster_id][0][0];
   const uint32_t      ref_n = g_hbm_core_free_count[cluster_id][0];
-  uint32_t i, core;
 
-  for (i = 0; i < ref_n && out_cnt < MAX_COMMON_BLOCKS; ++i) {
+  for (uint32_t i = 0; i < ref_n && out_cnt < MAX_COMMON_BLOCKS; ++i) {
     const daml_block_t *X = &ref[i];
     int in_all = 1;
 
-    for (core = 1; core < CORES_PER_CLUSTER; ++core) {
-      const daml_block_t *lst   = &g_hbm_core_free[cluster_id][core][0];
-      const uint32_t      lst_n = g_hbm_core_free_count[cluster_id][core];
+    for (uint32_t k = 1; k < g_rt_cores_per_cluster; ++k) {
+      if (k >= CORES_PER_CLUSTER) { in_all = 0; break; }  /* static cap too small */
+      const daml_block_t *lst   = &g_hbm_core_free[cluster_id][k][0];
+      const uint32_t      lst_n = g_hbm_core_free_count[cluster_id][k];
       if (!daml_contains(lst, lst_n, X)) { in_all = 0; break; }
     }
 
@@ -220,27 +246,28 @@ static inline void soc_daml_build_cluster_common(int cluster_id) {
 }
 
 /* ------------------------------------------------------------
- *          API: system-wide intersection builder (opt)
+ *           System-wide intersection (ALL clusters)
  * ------------------------------------------------------------ */
-/* Find blocks free in ALL cores of ALL clusters (uses cluster_common as inputs). */
-static inline void soc_daml_build_system_common(void) {
-  uint32_t out_cnt = 0u, c, i;
+static inline void soc_daml_build_system_common(void)
+{
+  uint32_t out_cnt = 0u;
 
   daml_lock_global();
 
   g_hbm_system_common_count = 0u;
   daml_fence();
 
-  if (NUM_CLUSTERS == 0) { daml_unlock_global(); return; }
+  if (g_rt_num_clusters == 0u) { daml_unlock_global(); return; }
 
   const daml_block_t *ref   = &g_hbm_cluster_common[0][0];
-  const uint32_t      ref_n = g_hbm_cluster_common_count[0];
+  const uint32_t      ref_n = (0 < NUM_CLUSTERS) ? g_hbm_cluster_common_count[0] : 0u;
 
-  for (i = 0; i < ref_n && out_cnt < MAX_COMMON_BLOCKS; ++i) {
+  for (uint32_t i = 0; i < ref_n && out_cnt < MAX_COMMON_BLOCKS; ++i) {
     const daml_block_t *X = &ref[i];
     int in_all = 1;
 
-    for (c = 1; c < NUM_CLUSTERS; ++c) {
+    for (uint32_t c = 1; c < g_rt_num_clusters; ++c) {
+      if (c >= NUM_CLUSTERS) { in_all = 0; break; }  /* static cap too small */
       const daml_block_t *lst   = &g_hbm_cluster_common[c][0];
       const uint32_t      lst_n = g_hbm_cluster_common_count[c];
       if (!daml_contains(lst, lst_n, X)) { in_all = 0; break; }
@@ -259,56 +286,49 @@ static inline void soc_daml_build_system_common(void) {
 }
 
 /* ------------------------------------------------------------
- *         Optional: wrappers around alloc/free (L1)
+ *            Optional wrappers around L1 alloc/free
  * ------------------------------------------------------------ */
-/*
- * These wrappers serialize allocator mutations with the cluster lock,
- * then trigger a per-core snapshot upload. The upload is done *after*
- * releasing the lock to avoid nested locking (deadlock-free).
- * You can skip these wrappers if your code calls domain_malloc/free
- * in other places — but then ensure you invoke soc_daml_upload_free_list()
- * yourself after each mutation and before intersections.
- */
+static inline void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t size)
+{
+  if (!daml_in_bounds_cc(cluster_id, core_id)) return 0;
 
-static inline void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t size) {
   void *ptr;
   daml_lock_cluster(cluster_id);
-  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);
+  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);  /* from flex_alloc.h */
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
-  /* publish fresh snapshot */
-  soc_daml_upload_free_list(cluster_id, core_id);
+  soc_daml_upload_free_list(cluster_id, core_id);  /* publish fresh snapshot */
   return ptr;
 }
 
-static inline void flex_l1_block_free(int cluster_id, int core_id, void *ptr) {
+static inline void flex_l1_block_free(int cluster_id, int core_id, void *ptr)
+{
+  if (!daml_in_bounds_cc(cluster_id, core_id)) return;
+
   daml_lock_cluster(cluster_id);
-  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);
+  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);          /* from flex_alloc.h */
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
-  /* publish fresh snapshot */
-  soc_daml_upload_free_list(cluster_id, core_id);
+  soc_daml_upload_free_list(cluster_id, core_id);  /* publish fresh snapshot */
 }
 
 /* ------------------------------------------------------------
- *                       Convenience getters
+ *                       Public getters
  * ------------------------------------------------------------ */
 static inline uint32_t soc_daml_get_core_free_count(int cluster_id, int core_id) {
-  return g_hbm_core_free_count[cluster_id][core_id];
+  return daml_in_bounds_cc(cluster_id, core_id) ? g_hbm_core_free_count[cluster_id][core_id] : 0u;
 }
 static inline const daml_block_t* soc_daml_get_core_free_list(int cluster_id, int core_id) {
-  return &g_hbm_core_free[cluster_id][core_id][0];
+  return daml_in_bounds_cc(cluster_id, core_id) ? &g_hbm_core_free[cluster_id][core_id][0] : (const daml_block_t*)0;
 }
-
 static inline uint32_t soc_daml_get_cluster_common_count(int cluster_id) {
-  return g_hbm_cluster_common_count[cluster_id];
+  return daml_in_bounds_cluster(cluster_id) ? g_hbm_cluster_common_count[cluster_id] : 0u;
 }
 static inline const daml_block_t* soc_daml_get_cluster_common(int cluster_id) {
-  return &g_hbm_cluster_common[cluster_id][0];
+  return daml_in_bounds_cluster(cluster_id) ? &g_hbm_cluster_common[cluster_id][0] : (const daml_block_t*)0;
 }
-
 static inline uint32_t soc_daml_get_system_common_count(void) {
   return g_hbm_system_common_count;
 }
