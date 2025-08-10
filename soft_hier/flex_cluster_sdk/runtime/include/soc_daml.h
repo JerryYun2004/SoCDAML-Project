@@ -63,7 +63,7 @@ daml_block_t g_hbm_core_free[NUM_CLUSTERS][CORES_PER_CLUSTER][MAX_FREE_BLOCKS_PE
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_core_free_count[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
-/* (Legacy exact “cluster-common” containers — kept for future; not used in relaxed rule) */
+/* (Exact “cluster-common” containers — optional/legacy; not used by relaxed rule) */
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_cluster_common[NUM_CLUSTERS][MAX_COMMON_BLOCKS];
 __attribute__((section(".hbm")))
