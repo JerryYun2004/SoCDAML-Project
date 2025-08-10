@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "flex_cluster_arch.h"  // ARCH_NUM_* macros
+#include "flex_cluster_arch.h"  // ARCH_NUM_* macros (generated)
 #include "flex_alloc.h"         // alloc_t, alloc_block_t APIs
 
 #ifndef ARCH_NUM_CLUSTER_X
@@ -29,12 +29,11 @@
 #define NUM_CLUSTERS         ((NUM_CLUSTER_X) * (NUM_CLUSTER_Y))
 #define CORES_PER_CLUSTER    (ARCH_NUM_CORE_PER_CLUSTER)
 
-/* Keep metadata small to fit i-mem budget when logs are enabled */
 #ifndef MAX_FREE_BLOCKS_PER_CORE
-#define MAX_FREE_BLOCKS_PER_CORE  64u
+#define MAX_FREE_BLOCKS_PER_CORE  128u
 #endif
 #ifndef MAX_COMMON_BLOCKS
-#define MAX_COMMON_BLOCKS         64u
+#define MAX_COMMON_BLOCKS         128u
 #endif
 
 typedef struct {
