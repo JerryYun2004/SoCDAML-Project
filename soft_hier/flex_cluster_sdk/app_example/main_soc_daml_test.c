@@ -1,3 +1,15 @@
+/* --- Kill compiler-inserted traps (RISC-V emits ebreak) --- */
+static inline __attribute__((always_inline,noreturn)) void __socd_halt_forever(void) {
+    for (;;) { __asm__ volatile ("" ::: "memory"); }
+}
+#ifdef __GNUC__
+  #undef  __builtin_trap
+  #undef  __builtin_unreachable
+  #define __builtin_trap()        __socd_halt_forever()
+  #define __builtin_unreachable() __socd_halt_forever()
+#endif
+/* ---------------------------------------------------------- */
+
 #include "flex_runtime.h"
 #include "flex_printf.h"
 #include "flex_dma_pattern.h"
@@ -185,3 +197,24 @@ int main(void)
     flex_eoc(eoc_val);
     return 0;
 }
+
+/* ============================================================
+ *                 NO-BREAK SHIMS (no semihosting)
+ * Provide strong symbols so the linker won’t pull in the
+ * semihosting/newlib versions that contain 'ebreak'.
+ * ============================================================ */
+__attribute__((weak, noreturn)) void abort(void)               { for (;;){ } }
+__attribute__((weak, noreturn)) void __assert_fail(const char*,
+                                                   const char*,
+                                                   unsigned int,
+                                                   const char*) { for (;;){ } }
+__attribute__((weak, noreturn)) void __stack_chk_fail(void)    { for (;;){ } }
+__attribute__((weak, noreturn)) void _exit(int x)              { (void)x; for (;;){ } }
+
+/* Some runtimes call into these; make them harmless. */
+__attribute__((weak)) int raise(int sig)            { (void)sig; return 0; }
+__attribute__((weak)) int kill(int pid, int sig)    { (void)pid; (void)sig; return 0; }
+__attribute__((weak)) int getpid(void)              { return 1; }
+
+/* Optional C++ pure-virtual guard (even if you don't use C++). */
+__attribute__((weak)) void __cxa_pure_virtual(void) { for (;;){ } }
