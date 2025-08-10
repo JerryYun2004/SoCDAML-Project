@@ -218,14 +218,12 @@ static inline void soc_daml_init_allocators_for_cluster(
 {
   if (!daml_in_bounds_cluster(cluster_id)) return;
 
-  /* Initialize only our row in g_hbm_l1_allocators and write block headers
-   * into THIS cluster's L1 (via flex_cluster_alloc_init). */
   for (uint32_t k = 0; k < g_rt_cores_per_cluster; ++k) {
     alloc_t *A = &g_hbm_l1_allocators[cluster_id][k];
     void    *B = base_addrs_per_core[k];
     uint32_t S = sizes_per_core[k];
 
-    /* flex_cluster_alloc_init writes the first block header at B (local L1). */
+    /* Writes first free block into THIS cluster's local L1. */
     flex_cluster_alloc_init(A, B, S);
   }
 
