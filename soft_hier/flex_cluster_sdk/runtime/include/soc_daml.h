@@ -307,3 +307,16 @@ static inline uint32_t soc_daml_get_system_common_relaxed_valid(int core_id) {
 static inline const daml_block_t* soc_daml_get_system_common_relaxed(int core_id) {
   return ((unsigned)core_id < g_rt_cores_per_cluster) ? &g_hbm_system_common_relaxed_per_core[core_id] : (const daml_block_t*)0;
 }
+
+/* ------------------------------------------------------------
+ *                No‑break shims (avoid ebreak)
+ * ------------------------------------------------------------ */
+static inline void soc_nobrk_timer_start(void) { /* no-op */ }
+static inline void soc_nobrk_timer_end(void)   { /* no-op */ }
+
+/* Write EOC register directly without triggering an ebreak. */
+static inline void soc_nobrk_eoc(uint32_t value)
+{
+  volatile uint32_t *eoc = (volatile uint32_t *)(ARCH_SOC_REGISTER_EOC);
+  *eoc = value;
+}
