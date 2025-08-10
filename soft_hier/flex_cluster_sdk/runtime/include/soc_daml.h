@@ -2,36 +2,30 @@
 /*
  * soc_daml.h — SoftHier P1 runtime (HBM-visible allocation metadata)
  *
- * - Derives cluster/core dimensions from flex_cluster_arch.h (generated from arch.py)
+ * Self-contained (no external arch header required).
+ * Defaults: 4x4 mesh, 3 cores/cluster  => NUM_CLUSTERS=16, CORES_PER_CLUSTER=3.
+ * You can override at build-time: -DNUM_CLUSTERS=<N> -DCORES_PER_CLUSTER=<M>
+ *
  * - Per-core upload of L1 free-list snapshots into HBM
  * - Cluster-wide + system-wide intersections (free in ALL cores[/clusters])
+ * - Spinlocks + fences for correctness
  * - No compact libc calls (no memset/memcpy/etc.)
  */
 
 #include <stdint.h>
 #include <stddef.h>
-#include "flex_cluster_arch.h"  // generated from flex_cluster_arch.py
-#include "flex_alloc.h"         // alloc_t, alloc_block_t, flex_cluster_alloc_init(), domain_malloc(), domain_free()
+#include "flex_alloc.h"   /* alloc_t, alloc_block_t, flex_cluster_alloc_init(), domain_malloc(), domain_free() */
 
 /* ------------------------------------------------------------
- *                 Dimensions (from platform config)
+ *                 Dimensions (self-contained)
  * ------------------------------------------------------------ */
-/* Build-time caps come from generated macros */
-#ifndef ARCH_NUM_CLUSTER_X
-#error "ARCH_NUM_CLUSTER_X not defined. Include the generated flex_cluster_arch.h"
+/* Defaults for SoftHier tutorial: 4x4 clusters, 3 cores/cluster */
+#ifndef NUM_CLUSTERS
+#define NUM_CLUSTERS         16u
 #endif
-#ifndef ARCH_NUM_CLUSTER_Y
-#error "ARCH_NUM_CLUSTER_Y not defined. Include the generated flex_cluster_arch.h"
+#ifndef CORES_PER_CLUSTER
+#define CORES_PER_CLUSTER    3u
 #endif
-#ifndef ARCH_NUM_CORE_PER_CLUSTER
-#error "ARCH_NUM_CORE_PER_CLUSTER not defined. Include the generated flex_cluster_arch.h"
-#endif
-
-/* Statically sized arrays sized for the *maximum* mesh we build for */
-#define NUM_CLUSTER_X        (ARCH_NUM_CLUSTER_X)
-#define NUM_CLUSTER_Y        (ARCH_NUM_CLUSTER_Y)
-#define NUM_CLUSTERS         ((NUM_CLUSTER_X) * (NUM_CLUSTER_Y))
-#define CORES_PER_CLUSTER    (ARCH_NUM_CORE_PER_CLUSTER)
 
 /* Tweak these if you expect longer free lists or more results */
 #ifndef MAX_FREE_BLOCKS_PER_CORE
@@ -82,9 +76,8 @@ volatile int g_global_lock;
 /* ------------------------------------------------------------
  *           Runtime dimensions (for safe bounds/iteration)
  * ------------------------------------------------------------ */
-/* These are set at runtime by main() using the generated macros;
- * they let us iterate exactly the instantiated mesh size (and
- * skip out-of-range clusters/cores safely if someone changes the config). */
+/* These are caps used by iteration/guards. You can set them from main()
+ * via soc_daml_set_runtime_dims() (<= build-time caps above). */
 __attribute__((section(".hbm")))
 static volatile uint32_t g_rt_num_clusters = NUM_CLUSTERS;
 
@@ -94,7 +87,7 @@ static volatile uint32_t g_rt_cores_per_cluster = CORES_PER_CLUSTER;
 static inline void soc_daml_set_runtime_dims(uint32_t num_clusters,
                                              uint32_t cores_per_cluster)
 {
-  g_rt_num_clusters      = (num_clusters  <= NUM_CLUSTERS)      ? num_clusters      : NUM_CLUSTERS;
+  g_rt_num_clusters      = (num_clusters      <= NUM_CLUSTERS)      ? num_clusters      : NUM_CLUSTERS;
   g_rt_cores_per_cluster = (cores_per_cluster <= CORES_PER_CLUSTER) ? cores_per_cluster : CORES_PER_CLUSTER;
 }
 
@@ -151,13 +144,13 @@ static inline int daml_in_bounds_cc(int cid, int core) {
  *                 Initialization (allocators + HBM)
  * ------------------------------------------------------------ */
 /* Pass per-(cluster,core) base+size for L1 allocators.
- * Note: allocator/free-list shape defined in flex_alloc.h (node at block start).  */
+ * Note: allocator/free-list shape defined in flex_alloc.h (node at block start). */
 static inline void soc_daml_init_allocators(void *base_addrs[NUM_CLUSTERS][CORES_PER_CLUSTER],
                                             uint32_t sizes[NUM_CLUSTERS][CORES_PER_CLUSTER])
 {
   for (uint32_t c = 0; c < NUM_CLUSTERS; ++c) {
     for (uint32_t k = 0; k < CORES_PER_CLUSTER; ++k) {
-      flex_cluster_alloc_init(&g_hbm_l1_allocators[c][k], base_addrs[c][k], sizes[c][k]);  /* from flex_alloc.h */
+      flex_cluster_alloc_init(&g_hbm_l1_allocators[c][k], base_addrs[c][k], sizes[c][k]);
     }
   }
 
@@ -294,7 +287,7 @@ static inline void *flex_l1_block_alloc(int cluster_id, int core_id, uint32_t si
 
   void *ptr;
   daml_lock_cluster(cluster_id);
-  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);  /* from flex_alloc.h */
+  ptr = domain_malloc(&g_hbm_l1_allocators[cluster_id][core_id], size);
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
@@ -307,7 +300,7 @@ static inline void flex_l1_block_free(int cluster_id, int core_id, void *ptr)
   if (!daml_in_bounds_cc(cluster_id, core_id)) return;
 
   daml_lock_cluster(cluster_id);
-  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);          /* from flex_alloc.h */
+  domain_free(&g_hbm_l1_allocators[cluster_id][core_id], ptr);
   daml_fence();
   daml_unlock_cluster(cluster_id);
 
