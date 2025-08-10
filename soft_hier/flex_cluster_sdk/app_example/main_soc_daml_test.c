@@ -1,15 +1,3 @@
-/* --- Kill compiler-inserted traps (RISC-V emits ebreak) --- */
-static inline __attribute__((always_inline,noreturn)) void __socd_halt_forever(void) {
-    for (;;) { __asm__ volatile ("" ::: "memory"); }
-}
-#ifdef __GNUC__
-  #undef  __builtin_trap
-  #undef  __builtin_unreachable
-  #define __builtin_trap()        __socd_halt_forever()
-  #define __builtin_unreachable() __socd_halt_forever()
-#endif
-/* ---------------------------------------------------------- */
-
 #include "flex_runtime.h"
 #include "flex_printf.h"
 #include "flex_dma_pattern.h"
