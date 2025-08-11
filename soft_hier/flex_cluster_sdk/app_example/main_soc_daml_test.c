@@ -9,7 +9,7 @@
  * -------------------------------------------------------------------------- */
 
 #ifndef BROADCAST_BYTES
-#define BROADCAST_BYTES  2048u   /* 2 KiB default; clamped to common size */
+#define BROADCAST_BYTES  2048u   /* 2 KiB by default; will be clamped */
 #endif
 
 static void fill_pattern_u32(uint32_t *dst, uint32_t n_words, uint32_t seed)
@@ -89,22 +89,11 @@ int main(void)
         printf("[BOOT] Using %dx%d clusters, %d cores/cluster\n",
                ARCH_NUM_CLUSTER_X, ARCH_NUM_CLUSTER_Y, ARCH_NUM_CORE_PER_CLUSTER);
         flex_timer_start();
-
-        /* clear system-common outputs */
+        /* clear top-level system-common outputs */
         g_hbm_system_common_count = 0u;
         daml_zero_bytes(&g_hbm_system_common[0], (uint32_t)sizeof(g_hbm_system_common));
-
-        /* init HBM allocator once (C0/K0) */
+        /* Initialize HBM allocator once (C0/K0) */
         soc_daml_init_hbm_allocator();
-
-        /* reset broadcast control + statuses */
-        {
-            uint32_t i;
-            for (i = 0; i < ARCH_NUM_CLUSTER; ++i) { g_verify_status[i] = -2; }
-            g_bcast_go = 0u;
-            g_bcast_len = 0u;
-            g_bcast_src_addr = 0u;
-        }
     }
     flex_global_barrier_xy();
 
@@ -119,6 +108,41 @@ int main(void)
                 printf("[BOOT] Init allocators (cluster %u)\n", cid);
                 soc_daml_init_allocators_this_cluster(cid);
                 printf("[BOOT] Done (cluster %u)\n", cid);
+            }
+            flex_global_barrier_xy();
+        }
+    }
+
+    /* ----------------------------------------------------------------------
+     * NEW: make some L1 allocations BEFORE we snapshot
+     *
+     * Goal: ensure common range is not the entire L1, so we exercise
+     *       the union-per-cluster and the inter-cluster intersection.
+     *
+     * Policy: only core0 per cluster allocates from its own arena.
+     *         Use a deterministic per-cluster size pattern and align it.
+     * ---------------------------------------------------------------------- */
+    {
+        const uint32_t align = (uint32_t)sizeof(alloc_block_t);
+        uint32_t cid;
+        for (cid = 0; cid < ARCH_NUM_CLUSTER; ++cid) {
+            flex_global_barrier_xy();
+            if (flex_get_cluster_id() == cid && flex_get_core_id() == 0) {
+                /* Make clusters differ:
+                 *   base 6 KiB + (cid % 3)*1 KiB, rounded up to allocator alignment.
+                 */
+                uint32_t req = 6u * 1024u + (cid % 3u) * 1024u;
+                if ((req & (align - 1u)) != 0u) {
+                    req = (req + align - 1u) & ~(align - 1u);
+                }
+                void *p = domain_malloc((alloc_t *)&g_hbm_l1_allocators[cid][0], req);
+                if (p != 0) {
+                    printf("[PREALLOC] C%u/K0 reserved 0x%08x bytes @ 0x%08x\n",
+                           cid, (unsigned)req, (unsigned)(uint32_t)(uintptr_t)p - 4u /* data ptr, header sits before */);
+                } else {
+                    printf("[PREALLOC][WARN] C%u/K0 failed to reserve 0x%08x bytes\n",
+                           cid, (unsigned)req);
+                }
             }
             flex_global_barrier_xy();
         }
@@ -184,7 +208,7 @@ int main(void)
         for (cid = 0; cid < ARCH_NUM_CLUSTER; ++cid) {
             flex_global_barrier_xy();
             if (flex_get_cluster_id() == cid && flex_get_core_id() == 0) {
-                soc_daml_build_cluster_free_bitmap(cid);
+                soc_daml_build_cluster_free_bitmap(cid); /* OR of per-core bitmaps */
             }
             flex_global_barrier_xy();
         }
@@ -215,6 +239,10 @@ int main(void)
 
     /* ----------------------------------------------------------------------
      * DMA-style BROADCAST VALIDATION (emulated with a word copy)
+     * - Choose first system-common range
+     * - C0/K0 allocates HBM src and fills a pattern
+     * - Each cluster core0 copies HBM->L1 at the SAME L1 address
+     * - Each cluster core0 verifies the pattern
      * ---------------------------------------------------------------------- */
     {
         uint32_t sys_n = soc_daml_get_system_common_count();
@@ -225,11 +253,10 @@ int main(void)
             uint32_t common_size = sys_common[0].size;
 
             uint32_t len = BROADCAST_BYTES;
-            if (len > common_size)
-            {
+            if (len > common_size) {
                 len = common_size;
             }
-            len = len & ~0x3u; /* align to 4 bytes for word copy */
+            len &= ~0x3u; /* word align */
 
             if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
             {
@@ -239,102 +266,69 @@ int main(void)
             }
             flex_global_barrier_xy();
 
-            /* --- C0/K0 allocates and publishes source in HBM --- */
+            /* Allocate and fill HBM source on C0/K0 */
+            static void *hbm_src = 0;
             if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
             {
-                uint32_t i;
-                for (i = 0; i < ARCH_NUM_CLUSTER; ++i) { g_verify_status[i] = -2; }
-
-                void *hbm_src = flex_hbm_malloc(len);
-                if (hbm_src == 0)
-                {
+                hbm_src = flex_hbm_malloc(len);
+                if (hbm_src == 0) {
                     printf("[TEST][ERR] HBM malloc failed for len=0x%08x\n", len);
-                    g_bcast_len = 0u;
-                    g_bcast_src_addr = 0u;
-                    __sync_synchronize();
-                    g_bcast_go = 0u;
-                    __sync_synchronize();
-                }
-                else
-                {
+                } else {
                     fill_pattern_u32((uint32_t *)hbm_src, (len >> 2), 0xA5A5A5A5u);
                     printf("[TEST] HBM src @ %p filled with pattern\n", hbm_src);
-
-                    g_bcast_len      = len;
-                    g_bcast_src_addr = (uint32_t)(uintptr_t)hbm_src;
-                    __sync_synchronize();   /* publish addr/len before GO */
-                    g_bcast_go       = 1u;
-                    __sync_synchronize();   /* make GO visible */
                 }
             }
             flex_global_barrier_xy();
 
-            /* --- All clusters wait until GO is set, then copy & verify --- */
-            while (g_bcast_go == 0u) { /* spin */ }
-            __sync_synchronize();
-
+            if (hbm_src == 0)
             {
-                uint32_t src_addr = g_bcast_src_addr;
-                uint32_t xfer_len = g_bcast_len;
-
-                if (src_addr != 0u)
+                if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
+                    printf("[TEST][ABORT] No HBM source; skipping broadcast test\n");
+                }
+            }
+            else
+            {
+                /* Perform one transfer per cluster (core 0), to the same L1 address. */
+                if (flex_get_core_id() == 0)
                 {
+                    local_copy_from_hbm((void *)(uintptr_t)common_base, hbm_src, len);
+                }
+                flex_global_barrier_xy();
+
+                /* Verify on each cluster (core 0). */
+                {
+                    int bad_idx = -2;
+                    if (flex_get_core_id() == 0) {
+                        bad_idx = verify_pattern_u32(
+                            (const uint32_t *)(uintptr_t)common_base,
+                            (len >> 2),
+                            0xA5A5A5A5u);
+                    }
+
+                    flex_global_barrier_xy();
                     if (flex_get_core_id() == 0)
                     {
-                        local_copy_from_hbm((void *)(uintptr_t)common_base,
-                                            (const void *)(uintptr_t)src_addr,
-                                            xfer_len);
-                    }
-                    flex_global_barrier_xy();
-
-                    if (flex_get_core_id() == 0)
-                    {
-                        int st = verify_pattern_u32(
-                                    (const uint32_t *)(uintptr_t)common_base,
-                                    (xfer_len >> 2),
-                                    0xA5A5A5A5u);
-                        g_verify_status[flex_get_cluster_id()] = st;
-                        __sync_synchronize();
-                    }
-                    flex_global_barrier_xy();
-
-                    if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
-                    {
-                        uint32_t cid;
-                        for (cid = 0; cid < ARCH_NUM_CLUSTER; ++cid) {
-                            int st = g_verify_status[cid];
-                            if (st == -1) {
-                                printf("[TEST][OK ] Cluster %u verified %u bytes at 0x%08x\n",
-                                       cid, (unsigned)xfer_len, common_base);
-                            } else if (st >= 0) {
-                                uint32_t err_addr = common_base + ((uint32_t)st << 2);
-                                printf("[TEST][ERR] Cluster %u mismatch at word %d (addr=0x%08x)\n",
-                                       cid, st, err_addr);
-                            } else {
-                                printf("[TEST][ERR] Cluster %u status unset\n", cid);
-                            }
+                        if (bad_idx == -1)
+                        {
+                            printf("[TEST][OK ] Cluster %u verified %u bytes at 0x%08x\n",
+                                   flex_get_cluster_id(), (unsigned)len, common_base);
+                        }
+                        else
+                        {
+                            uint32_t err_addr = common_base + ((uint32_t)bad_idx << 2);
+                            printf("[TEST][ERR] Cluster %u mismatch at word %d (addr=0x%08x)\n",
+                                   flex_get_cluster_id(), bad_idx, err_addr);
                         }
                     }
                     flex_global_barrier_xy();
+                }
 
-                    if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
-                    {
-                        if (g_bcast_src_addr != 0u) {
-                            void *to_free = (void *)(uintptr_t)g_bcast_src_addr;
-                            flex_hbm_free(to_free);
-                        }
-                        g_bcast_go = 0u;
-                        __sync_synchronize();
-                    }
-                    flex_global_barrier_xy();
-                }
-                else
+                /* Free HBM source on C0/K0. */
+                if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
                 {
-                    if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0) {
-                        printf("[TEST][ABORT] No HBM source; skipping broadcast test\n");
-                    }
-                    flex_global_barrier_xy();
+                    flex_hbm_free(hbm_src);
                 }
+                flex_global_barrier_xy();
             }
         }
         else
