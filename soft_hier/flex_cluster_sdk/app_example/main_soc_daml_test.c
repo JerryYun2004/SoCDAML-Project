@@ -5,6 +5,15 @@
 #include <stdint.h>
 
 /* --------------------------------------------------------------------------
+ * Broadcast verification status per cluster (HBM-visible so all see it)
+ *  -1 : OK
+ * >=0: mismatch index
+ * -2 : not set yet
+ * -------------------------------------------------------------------------- */
+__attribute__((section(".hbm")))
+static volatile int g_verify_status[ARCH_NUM_CLUSTER];
+
+/* --------------------------------------------------------------------------
  * Simple helpers for the broadcast validation
  * -------------------------------------------------------------------------- */
 
@@ -89,8 +98,11 @@ int main(void)
         /* clear top-level system-common outputs */
         g_hbm_system_common_count = 0u;
         daml_zero_bytes(&g_hbm_system_common[0], (uint32_t)sizeof(g_hbm_system_common));
-        /* --- NEW: initialize HBM allocator once (C0/K0) --- */
+        /* NEW: initialize HBM allocator once (C0/K0) */
         soc_daml_init_hbm_allocator();
+
+        /* NEW: init verification status table */
+        for (uint32_t i = 0; i < ARCH_NUM_CLUSTER; ++i) { g_verify_status[i] = -2; }
     }
     flex_global_barrier_xy();
 
@@ -186,7 +198,8 @@ int main(void)
      * - Choose first system-common range
      * - C0/K0 allocates HBM src and fills a pattern
      * - Each cluster core0 copies HBM->L1 at the SAME L1 address
-     * - Each cluster core0 verifies the pattern
+     * - Each cluster core0 verifies the pattern and stores status
+     * - C0/K0 prints all cluster results in order
      * ---------------------------------------------------------------------- */
     {
         uint32_t sys_n = soc_daml_get_system_common_count();
@@ -209,6 +222,8 @@ int main(void)
                 printf("[TEST] DMA broadcast demo:\n");
                 printf("       common L1 dst = 0x%08x, size available = 0x%08x, copy len = 0x%08x\n",
                        common_base, common_size, len);
+                /* reset result table */
+                for (uint32_t i = 0; i < ARCH_NUM_CLUSTER; ++i) { g_verify_status[i] = -2; }
             }
             flex_global_barrier_xy();
 
@@ -246,34 +261,43 @@ int main(void)
                 }
                 flex_global_barrier_xy();
 
-                /* Verify on each cluster (core 0). */
+                /* Verify on each cluster (core 0) and store status. */
+                int local_status = -2;
+                if (flex_get_core_id() == 0)
                 {
-                    int bad_idx = -2;
-                    if (flex_get_core_id() == 0)
-                    {
-                        bad_idx = verify_pattern_u32(
-                            (const uint32_t *)(uintptr_t)common_base,
-                            (len >> 2),
-                            0xA5A5A5A5u);
-                    }
+                    local_status = verify_pattern_u32(
+                        (const uint32_t *)(uintptr_t)common_base,
+                        (len >> 2),
+                        0xA5A5A5A5u);
+                    g_verify_status[flex_get_cluster_id()] = local_status;
+                }
+                flex_global_barrier_xy();
 
-                    flex_global_barrier_xy();
-                    if (flex_get_core_id() == 0)
+                /* Print results in cluster order from C0/K0 for clean logs. */
+                if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
+                {
+                    for (uint32_t cid = 0; cid < ARCH_NUM_CLUSTER; ++cid)
                     {
-                        if (bad_idx == -1)
+                        int st = g_verify_status[cid];
+                        if (st == -1)
                         {
                             printf("[TEST][OK ] Cluster %u verified %u bytes at 0x%08x\n",
-                                   flex_get_cluster_id(), (unsigned)len, common_base);
+                                   cid, (unsigned)len, common_base);
+                        }
+                        else if (st >= 0)
+                        {
+                            uint32_t err_addr = common_base + ((uint32_t)st << 2);
+                            printf("[TEST][ERR] Cluster %u mismatch at word %d (addr=0x%08x)\n",
+                                   cid, st, err_addr);
                         }
                         else
                         {
-                            uint32_t err_addr = common_base + ((uint32_t)bad_idx << 2);
-                            printf("[TEST][ERR] Cluster %u mismatch at word %d (addr=0x%08x)\n",
-                                   flex_get_cluster_id(), bad_idx, err_addr);
+                            /* still unset (-2) – shouldn’t happen if barriers are correct */
+                            printf("[TEST][ERR] Cluster %u status unset\n", cid);
                         }
                     }
-                    flex_global_barrier_xy();
                 }
+                flex_global_barrier_xy();
 
                 /* Free HBM source on C0/K0. */
                 if (flex_get_cluster_id() == 0 && flex_get_core_id() == 0)
@@ -305,5 +329,3 @@ int main(void)
     flex_eoc(eoc_val);
     return 0;
 }
-
-   
