@@ -75,9 +75,6 @@ SECTIONS
     __tbss_end = .;
     __tbss_end2 = .;
   } >L3 :l3
-  /* add a section after .tbss to put the __tbss_end symbol into for
-     the LLD linker */
-  /* .tbssend : { __tbss_end2 = .; } */
 
   /* Cluster Local Storage sections */
   .cdata    :
@@ -142,7 +139,6 @@ SECTIONS
   __bss_end = .;
   _end = .; PROVIDE (end = .);
 
-
   /* Uninitialized data section in L3 */
   .dram :
   {
@@ -158,6 +154,7 @@ SECTIONS
     *(.hbm*)
     . = ALIGN(1024);
     __hbm_heap_start = .;
+    /* Define end of HBM heap explicitly */
+    __hbm_heap_end = ORIGIN(HBM) + LENGTH(HBM);
   } >HBM :hbm
-
 }
