@@ -374,8 +374,9 @@ extern volatile alloc_t alloc_hbm;
 
 /* Optional linker symbols (if your SDK exports them).
  * We guard their use so builds without these symbols still succeed. */
-extern uint8_t __hbm_heap_start[];  /* may be undefined — that’s fine */
-extern uint8_t __hbm_heap_end[];    /* may be undefined — that’s fine */
+/* These are declared in flex_runtime.h as `extern char[]`; use the same type. */
+extern char __hbm_heap_start[];
+extern char __hbm_heap_end[];
 
 /* Choose whether to try linker symbols first */
 #ifndef SOC_DAML_HBM_USE_LINKER
@@ -390,8 +391,8 @@ static inline void soc_daml_init_hbm_allocator(void)
 
 #if SOC_DAML_HBM_USE_LINKER
   /* Use linker symbols if they look sane */
-  uint32_t lbase = (uint32_t)(uintptr_t)__hbm_heap_start;
-  uint32_t lend  = (uint32_t)(uintptr_t)__hbm_heap_end;
+  uint32_t lbase = (uint32_t)(uintptr_t)&__hbm_heap_start[0];
+  uint32_t lend  = (uint32_t)(uintptr_t)&__hbm_heap_end[0];
   if (lend > lbase && lbase != 0u) {
     base = lbase;
     end  = lend;
