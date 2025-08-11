@@ -1,16 +1,19 @@
 #pragma once
 /*
- * soc_daml.h — HBM-visible allocator metadata & helpers (bitmap "in-between" rule)
+ * soc_daml.h — Cluster-level OR, system-level AND common-free detection
  *
- * Additions over the strict match version:
- *  - Partition L1 into fixed-size slots (S = 0x400).
- *  - For each (cluster,core) snapshot, build a FREE bitmap over slots.
- *  - Cluster-common bitmap = AND of core bitmaps in that cluster.
- *  - System-common  bitmap = AND of cluster-common bitmaps across clusters.
- *  - Convert common bitmaps back to contiguous (addr,size) ranges for printing.
+ * Semantics:
+ *   - A slot is FREE in a cluster if it is free in ANY core’s L1 arena (OR across cores).
+ *   - A slot is system-common if it is FREE in EVERY cluster (AND across clusters).
  *
- * Strict tuples (addr,size) data are still captured by the snapshot, but the
- * intersections run on bitmaps instead of exact tuple equality.
+ * Pipeline:
+ *   snapshots (lists of (addr,size) per (cluster,core))
+ *   -> per-core FREE bitmaps (S=0x400)
+ *   -> per-cluster FREE bitmap = OR over cores
+ *   -> system-common bitmap = AND over clusters
+ *   -> compress to contiguous ranges in g_hbm_system_common + count
+ *
+ * No libc; small helpers only.
  */
 
 #include <stdint.h>
@@ -21,7 +24,7 @@
 #include "flex_printf.h"
 
 /* --------------------------
- * Dimensions from platform
+ * Dimensions / Heap bounds
  * -------------------------- */
 #if defined(ARCH_NUM_CLUSTER)
 #define NUM_CLUSTERS         (ARCH_NUM_CLUSTER)
@@ -30,111 +33,91 @@
 #endif
 #define CORES_PER_CLUSTER    (ARCH_NUM_CORE_PER_CLUSTER)
 
-/* Heap bounds (per cluster, same numeric range in each cluster’s L1) */
 #define HEAP_BASE   (ARCH_CLUSTER_HEAP_BASE)
 #define HEAP_END    (ARCH_CLUSTER_HEAP_END)
-#define HEAP_SIZE   ((uint32_t)((HEAP_END) - (HEAP_BASE)))
 
-/* Slot size (granularity for the in-between rule) */
-#define SLOT_SIZE   (0x400u)  /* 1 KiB */
+/* Slot size for bitmaps (in-between granularity) */
+#ifndef SLOT_SIZE
+#define SLOT_SIZE 0x400u   /* 1 KB slots */
+#endif
 
-/* Derived slot counts/bitmap width */
-#define NUM_SLOTS       ((uint32_t)(((HEAP_SIZE) + (SLOT_SIZE) - 1u) / (SLOT_SIZE)))
-#define BITMAP_WORDS    ((uint32_t)(((NUM_SLOTS) + 31u) / 32u))
+/* Derived slot geometry */
+#define HEAP_SIZE_BYTES   ((uint32_t)((uint32_t)HEAP_END - (uint32_t)HEAP_BASE))
+#define NUM_SLOTS         (HEAP_SIZE_BYTES / SLOT_SIZE)
+#define BITMAP_WORDS      ((NUM_SLOTS + 31u) / 32u)
 
-/* Tunables for snapshot list → we still capture the free list for building bitmaps */
+/* Limits for list-style outputs (just for printing / API parity) */
 #ifndef MAX_FREE_BLOCKS_PER_CORE
 #define MAX_FREE_BLOCKS_PER_CORE  128u
 #endif
 #ifndef MAX_COMMON_BLOCKS
-#define MAX_COMMON_BLOCKS         128u   /* limits for converted ranges we emit for printing */
+#define MAX_COMMON_BLOCKS         128u
 #endif
 
 /* --------------------------
  * Types
  * -------------------------- */
 typedef struct {
-  void    *addr;   /* address of free block header in L1 */
-  uint32_t size;   /* size in bytes */
+  void    *addr;   /* block header (or slot) base */
+  uint32_t size;   /* bytes */
 } daml_block_t;
 
 /* --------------------------
  * HBM-resident global state
  * -------------------------- */
-/* Per-(cluster,core) allocators (their free lists live in L1) */
+
+/* Original per-(cluster,core) allocator handles (initialized on owner cluster) */
 __attribute__((section(".hbm")))
 alloc_t g_hbm_l1_allocators[NUM_CLUSTERS][CORES_PER_CLUSTER];
 
-/* Per-(cluster,core) snapshots of the free list */
+/* Original snapshots: free-list nodes per (cluster,core) */
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_core_free_count[NUM_CLUSTERS][CORES_PER_CLUSTER];
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_core_free[NUM_CLUSTERS][CORES_PER_CLUSTER][MAX_FREE_BLOCKS_PER_CORE];
 
-/* NEW: per-(cluster,core) FREE bitmap (over slots) */
+/* New: per-(cluster,core) FREE bitmaps (OR → cluster bitmap) */
 __attribute__((section(".hbm")))
-uint32_t g_hbm_core_free_bitmap[NUM_CLUSTERS][CORES_PER_CLUSTER][BITMAP_WORDS];
+volatile uint32_t g_hbm_core_free_bitmap[NUM_CLUSTERS][CORES_PER_CLUSTER][BITMAP_WORDS];
 
-/* Cluster-common and system-common bitmaps */
+/* New: per-cluster FREE bitmap = OR of cores */
 __attribute__((section(".hbm")))
-uint32_t g_hbm_cluster_common_bitmap[NUM_CLUSTERS][BITMAP_WORDS];
-__attribute__((section(".hbm")))
-uint32_t g_hbm_system_common_bitmap[BITMAP_WORDS];
+volatile uint32_t g_hbm_cluster_free_bitmap[NUM_CLUSTERS][BITMAP_WORDS];
 
-/* Converted ranges from the common bitmaps (for printing / easy inspection) */
+/* New: system-common FREE bitmap = AND of clusters */
 __attribute__((section(".hbm")))
-volatile uint32_t g_hbm_cluster_common_count[NUM_CLUSTERS];
-__attribute__((section(".hbm")))
-daml_block_t g_hbm_cluster_common[NUM_CLUSTERS][MAX_COMMON_BLOCKS];
+volatile uint32_t g_hbm_system_common_bitmap[BITMAP_WORDS];
 
+/* For convenience: compress final bitmap to ranges for logging / use */
 __attribute__((section(".hbm")))
 volatile uint32_t g_hbm_system_common_count;
 __attribute__((section(".hbm")))
 daml_block_t g_hbm_system_common[MAX_COMMON_BLOCKS];
 
-/* Simple locks in HBM (available if you need them later) */
-__attribute__((section(".hbm")))
-volatile int g_cluster_lock[NUM_CLUSTERS];
-__attribute__((section(".hbm")))
-volatile int g_global_lock;
+/* Simple locks (unused in this single-threaded builder, but kept for parity) */
+__attribute__((section(".hbm"))) volatile int g_cluster_lock[NUM_CLUSTERS];
+__attribute__((section(".hbm"))) volatile int g_global_lock;
 
-/* Runtime dimensions (allow using a smaller mesh at run-time if needed) */
-__attribute__((section(".hbm")))
-static volatile uint32_t g_rt_num_clusters = NUM_CLUSTERS;
-__attribute__((section(".hbm")))
-static volatile uint32_t g_rt_cores_per_cluster = CORES_PER_CLUSTER;
+/* Runtime dims (if you ever choose to run a sub-mesh) */
+__attribute__((section(".hbm"))) static volatile uint32_t g_rt_num_clusters = NUM_CLUSTERS;
+__attribute__((section(".hbm"))) static volatile uint32_t g_rt_cores_per_cluster = CORES_PER_CLUSTER;
 
 static inline void soc_daml_set_runtime_dims(uint32_t num_clusters,
                                              uint32_t cores_per_cluster)
 {
-  if (num_clusters <= NUM_CLUSTERS) {
-    g_rt_num_clusters = num_clusters;
-  } else {
-    g_rt_num_clusters = NUM_CLUSTERS;
-  }
-
-  if (cores_per_cluster <= CORES_PER_CLUSTER) {
-    g_rt_cores_per_cluster = cores_per_cluster;
-  } else {
-    g_rt_cores_per_cluster = CORES_PER_CLUSTER;
-  }
+  g_rt_num_clusters      = (num_clusters      <= NUM_CLUSTERS)      ? num_clusters      : NUM_CLUSTERS;
+  g_rt_cores_per_cluster = (cores_per_cluster <= CORES_PER_CLUSTER) ? cores_per_cluster : CORES_PER_CLUSTER;
 }
 
 /* --------------------------
  * Tiny utils (no libc)
  * -------------------------- */
 static inline void daml_zero_u32(volatile uint32_t *p, uint32_t n_words) {
-  uint32_t i;
-  for (i = 0; i < n_words; i++) {
-    p[i] = 0u;
-  }
+  for (uint32_t i = 0; i < n_words; ++i) p[i] = 0u;
 }
 static inline void daml_zero_bytes(volatile void *ptr, uint32_t n) {
   volatile uint8_t *q = (volatile uint8_t*)ptr;
-  uint32_t i;
-  for (i = 0; i < n; i++) {
-    q[i] = 0u;
-  }
+  for (uint32_t i = 0; i < n; ++i) q[i] = 0u;
 }
 static inline void daml_fence(void) { __sync_synchronize(); }
 
@@ -149,7 +132,7 @@ static inline void daml_fence(void) { __sync_synchronize(); }
 #endif
 
 /* --------------------------
- * Arena math (per-core L1)
+ * Arena math for per-core L1
  * -------------------------- */
 static inline void daml_compute_core_arena(uint32_t *out_base,
                                            uint32_t *out_size,
@@ -159,97 +142,66 @@ static inline void daml_compute_core_arena(uint32_t *out_base,
   const uint32_t heap_end  = (uint32_t)HEAP_END;
   const uint32_t heap_size = (heap_end > heap_base) ? (heap_end - heap_base) : 0u;
 
-  uint32_t share;
-  if (g_rt_cores_per_cluster > 0u) {
-    share = heap_size / g_rt_cores_per_cluster;
-  } else {
-    share = 0u;
-  }
+  uint32_t share = (g_rt_cores_per_cluster > 0) ? heap_size / g_rt_cores_per_cluster : 0u;
 
-  {
-    /* Keep block alignment compatible with allocator’s MIN_BLOCK_SIZE */
-    const uint32_t align = (uint32_t)sizeof(alloc_block_t);
-    share = (share / align) * align;
-  }
+  /* Align to allocator block header */
+  const uint32_t align = (uint32_t)sizeof(alloc_block_t);
+  share = (share / align) * align;
 
-  {
-    uint32_t base = heap_base + core_id * share;
-    uint32_t size;
+  uint32_t base = heap_base + core_id * share;
+  uint32_t size = (core_id == (g_rt_cores_per_cluster - 1)) ? (heap_end - base) : share;
+  size = (size / align) * align;
 
-    if (core_id == (g_rt_cores_per_cluster - 1u)) {
-      size = heap_end - base;
-    } else {
-      size = share;
-    }
-
-    {
-      const uint32_t align = (uint32_t)sizeof(alloc_block_t);
-      size = (size / align) * align;
-    }
-
-    *out_base = base;
-    *out_size = size;
-  }
+  *out_base = base;
+  *out_size = size;
 }
 
-/* ============================================================
- *                   SNAPSHOT + BITMAP HELPERS
- * ============================================================ */
-
-/* Per-cluster allocator init (must be called on owner cluster) */
+/* --------------------------
+ * Cluster-local allocator init
+ * -------------------------- */
 static inline void soc_daml_init_allocators_this_cluster(uint32_t cid)
 {
-  uint32_t k;
-
-  /* Clear metadata for this cluster */
-  g_hbm_cluster_common_count[cid] = 0u;
-  daml_zero_bytes(&g_hbm_cluster_common[cid][0], (uint32_t)sizeof(g_hbm_cluster_common[cid]));
-  for (k = 0; k < g_rt_cores_per_cluster; k++) {
+  /* clear old metadata (snapshots + bitmaps) */
+  for (uint32_t k = 0; k < g_rt_cores_per_cluster; ++k) {
     g_hbm_core_free_count[cid][k] = 0u;
     daml_zero_bytes(&g_hbm_core_free[cid][k][0], (uint32_t)sizeof(g_hbm_core_free[cid][k]));
-    /* clear per-core bitmap too */
     daml_zero_u32(&g_hbm_core_free_bitmap[cid][k][0], BITMAP_WORDS);
   }
+  daml_zero_u32(&g_hbm_cluster_free_bitmap[cid][0], BITMAP_WORDS);
   daml_fence();
 
-  /* Initialize the L1 allocator for each core of THIS cluster. */
-  for (k = 0; k < g_rt_cores_per_cluster; k++) {
+  /* init per-core allocators for this cluster */
+  for (uint32_t kid = 0; kid < g_rt_cores_per_cluster; ++kid) {
     uint32_t base, size;
-    daml_compute_core_arena(&base, &size, k);
-    flex_cluster_alloc_init(&g_hbm_l1_allocators[cid][k], (void*)base, size);
-
+    daml_compute_core_arena(&base, &size, kid);
+    flex_cluster_alloc_init(&g_hbm_l1_allocators[cid][kid], (void*)base, size);
     BOOT_LOG("    [BOOT] C%u/K%u arena: [0x%08x .. 0x%08x) size=0x%08x\n",
-             cid, k, base, base + size, size);
+             cid, kid, base, base + size, size);
   }
 }
 
-/* Snapshot free list for (cid,kid) — must be called by the owner cluster */
+/* --------------------------
+ * Upload free-list snapshot
+ * -------------------------- */
 static inline void soc_daml_upload_free_list(uint32_t cid, uint32_t kid)
 {
   const uint32_t heap_lo = (uint32_t)HEAP_BASE;
   const uint32_t heap_hi = (uint32_t)HEAP_END;
-
-  uint32_t count = 0u;
-  alloc_t       *alloc;
-  alloc_block_t *curr;
 
   SNAP_LOG("[SNAPSHOT] Enter C%u/K%u\n", cid, kid);
 
   g_hbm_core_free_count[cid][kid] = 0u;
   daml_fence();
 
-  alloc = &g_hbm_l1_allocators[cid][kid];
-  curr  = alloc->first_block;
+  alloc_t       *alloc = &g_hbm_l1_allocators[cid][kid];
+  alloc_block_t *curr  = alloc->first_block;
+  uint32_t count = 0u;
 
-  while ((curr != 0) && (count < MAX_FREE_BLOCKS_PER_CORE)) {
+  while (curr && (count < MAX_FREE_BLOCKS_PER_CORE)) {
     uint32_t p = (uint32_t)curr;
 
-    /* Validate pointer lies inside [heap_lo, heap_hi) for THIS cluster */
-    if ((p < heap_lo) ||
-        ((p + (uint32_t)sizeof(alloc_block_t)) > heap_hi) ||
-        ((p & ((uint32_t)sizeof(alloc_block_t) - 1u)) != 0u)) {
-      SNAP_LOG("[SNAPSHOT][WARN] C%u/K%u bad ptr=0x%08x (lo=0x%08x hi=0x%08x), abort list\n",
-               cid, kid, p, heap_lo, heap_hi);
+    if (p < heap_lo || (p + (uint32_t)sizeof(alloc_block_t)) > heap_hi || (p & (sizeof(alloc_block_t)-1))) {
+      SNAP_LOG("[SNAPSHOT][WARN] C%u/K%u bad ptr=0x%08x\n", cid, kid, p);
       break;
     }
 
@@ -266,345 +218,138 @@ static inline void soc_daml_upload_free_list(uint32_t cid, uint32_t kid)
   SNAP_LOG("[SNAPSHOT] Uploaded C%u/K%u blocks=%u\n", cid, kid, count);
 }
 
-/* -------- Bitmap building for a (cluster,core) snapshot -------- */
+/* --------------------------
+ * Bitmap helpers
+ * -------------------------- */
 
-static inline void daml_bitmap_clear_core(uint32_t cid, uint32_t kid)
+/* Mark [start, start+size) as FREE in bitmap, quantized to SLOT_SIZE. */
+static inline void daml_bitmap_mark_run(volatile uint32_t *bm,
+                                        uint32_t start,
+                                        uint32_t size)
 {
-  daml_zero_u32(&g_hbm_core_free_bitmap[cid][kid][0], BITMAP_WORDS);
-}
-
-/* Mark all slots overlapped by [addr, addr+size) as free in that core bitmap */
-static inline void daml_bitmap_mark_range(uint32_t cid, uint32_t kid,
-                                          uint32_t addr, uint32_t size)
-{
-  uint32_t heap_lo = (uint32_t)HEAP_BASE;
-  uint32_t heap_hi = (uint32_t)HEAP_END;
-
-  uint32_t start_addr;
-  uint32_t end_addr;
+  const uint32_t heap_lo = (uint32_t)HEAP_BASE;
+  const uint32_t heap_hi = (uint32_t)HEAP_END;
 
   /* Clamp to heap */
-  if (addr < heap_lo) {
-    start_addr = heap_lo;
-  } else {
-    start_addr = addr;
-  }
+  uint32_t lo = (start < heap_lo) ? heap_lo : start;
+  uint32_t hi = (start + size > heap_hi) ? heap_hi : (start + size);
+  if (hi <= lo) return;
 
-  {
-    uint32_t lim = addr + size;
-    if (lim > heap_hi) {
-      end_addr = heap_hi;
-    } else {
-      end_addr = lim;
-    }
-  }
+  /* Slot indices */
+  uint32_t first = (lo - heap_lo) / SLOT_SIZE;
+  uint32_t last_excl = (hi - heap_lo + SLOT_SIZE - 1u) / SLOT_SIZE; /* ceil */
+  if (last_excl > NUM_SLOTS) last_excl = NUM_SLOTS;
 
-  if (end_addr <= start_addr) {
-    return;
-  }
-
-  /* Compute covered slots [s0, s1] inclusive */
-  {
-    uint32_t off0 = start_addr - heap_lo;
-    uint32_t off1 = end_addr   - heap_lo; /* end exclusive */
-
-    uint32_t s0 = off0 / SLOT_SIZE;
-    uint32_t s1;
-
-    {
-      uint32_t end_minus_1 = end_addr - 1u;
-      uint32_t off1m1 = end_minus_1 - heap_lo;
-      s1 = off1m1 / SLOT_SIZE;
-    }
-
-    if (s0 >= NUM_SLOTS) {
-      return;
-    }
-    if (s1 >= NUM_SLOTS) {
-      s1 = NUM_SLOTS - 1u;
-    }
-
-    /* Set bits for s in [s0, s1] */
-    {
-      uint32_t s;
-      for (s = s0; s <= s1; s++) {
-        uint32_t word_idx = s >> 5;
-        uint32_t bit_idx  = s & 31u;
-        uint32_t mask     = (1u << bit_idx);
-        g_hbm_core_free_bitmap[cid][kid][word_idx] |= mask;
-      }
-    }
+  /* Set bits [first, last_excl) */
+  for (uint32_t s = first; s < last_excl; ++s) {
+    uint32_t w = s >> 5;          /* /32 */
+    uint32_t b = s & 31u;         /* %32 */
+    bm[w] |= (1u << b);
   }
 }
 
-/* Build per-core bitmap from its snapshot */
+/* Build per-core FREE bitmap from that core's snapshot */
 static inline void soc_daml_build_core_bitmap(uint32_t cid, uint32_t kid)
 {
-  uint32_t i;
-  uint32_t n = g_hbm_core_free_count[cid][kid];
+  volatile uint32_t *bm = &g_hbm_core_free_bitmap[cid][kid][0];
+  daml_zero_u32(bm, BITMAP_WORDS);
 
-  daml_bitmap_clear_core(cid, kid);
+  const uint32_t n = g_hbm_core_free_count[cid][kid];
+  for (uint32_t i = 0; i < n; ++i) {
+    const daml_block_t *blk = &g_hbm_core_free[cid][kid][i];
+    uint32_t start = (uint32_t)(uintptr_t)blk->addr;
+    uint32_t size  = blk->size;
+    daml_bitmap_mark_run(bm, start, size);
+  }
 
-  for (i = 0; i < n; i++) {
-    uint32_t addr = (uint32_t)(uintptr_t)g_hbm_core_free[cid][kid][i].addr;
-    uint32_t size = g_hbm_core_free[cid][kid][i].size;
-    daml_bitmap_mark_range(cid, kid, addr, size);
+  /* mask tail bits in last word */
+  if ((NUM_SLOTS & 31u) != 0u) {
+    uint32_t tail = NUM_SLOTS & 31u;
+    uint32_t mask = (1u << tail); mask = mask - 1u;
+    bm[BITMAP_WORDS - 1u] &= mask;
   }
 }
 
-/* ============================================================
- *                BITMAP INTERSECTIONS + RANGE EMIT
- * ============================================================ */
-
-/* Helper: set dst[] = 0xFFFFFFFF (and mask tail bits in last word) */
-static inline void daml_bitmap_set_all_ones(uint32_t *dst_words)
+/* dst (cluster FREE) = OR over cores */
+static inline void soc_daml_build_cluster_free_bitmap(uint32_t cid)
 {
-  uint32_t w;
-  for (w = 0; w < BITMAP_WORDS; w++) {
-    dst_words[w] = 0xFFFFFFFFu;
+  /* zero */
+  for (uint32_t w = 0; w < BITMAP_WORDS; ++w) {
+    g_hbm_cluster_free_bitmap[cid][w] = 0u;
   }
-  /* Mask tail bits beyond NUM_SLOTS */
-  {
-    uint32_t tail_bits = NUM_SLOTS & 31u;
-    if (tail_bits != 0u) {
-      uint32_t valid_mask = (1u << tail_bits);
-      valid_mask = valid_mask - 1u; /* low tail_bits = 1, others 0 */
-      dst_words[BITMAP_WORDS - 1u] &= valid_mask;
+  /* OR in every core */
+  for (uint32_t k = 0; k < g_rt_cores_per_cluster; ++k) {
+    for (uint32_t w = 0; w < BITMAP_WORDS; ++w) {
+      g_hbm_cluster_free_bitmap[cid][w] |= g_hbm_core_free_bitmap[cid][k][w];
     }
+  }
+  /* mask tail */
+  if ((NUM_SLOTS & 31u) != 0u) {
+    uint32_t tail = NUM_SLOTS & 31u;
+    uint32_t mask = (1u << tail); mask = mask - 1u;
+    g_hbm_cluster_free_bitmap[cid][BITMAP_WORDS - 1u] &= mask;
   }
 }
 
-/* dst = AND over all cores in cluster cid */
-static inline void soc_daml_build_cluster_common_bitmap(uint32_t cid)
-{
-  uint32_t w;
-  uint32_t k;
-
-  /* Start with all-ones */
-  for (w = 0; w < BITMAP_WORDS; w++) {
-    g_hbm_cluster_common_bitmap[cid][w] = 0xFFFFFFFFu;
-  }
-  {
-    uint32_t tail_bits = NUM_SLOTS & 31u;
-    if (tail_bits != 0u) {
-      uint32_t valid_mask = (1u << tail_bits);
-      valid_mask = valid_mask - 1u;
-      g_hbm_cluster_common_bitmap[cid][BITMAP_WORDS - 1u] &= valid_mask;
-    }
-  }
-
-  /* AND across core bitmaps */
-  for (k = 0; k < g_rt_cores_per_cluster; k++) {
-    for (w = 0; w < BITMAP_WORDS; w++) {
-      uint32_t word = g_hbm_core_free_bitmap[cid][k][w];
-      g_hbm_cluster_common_bitmap[cid][w] &= word;
-    }
-  }
-}
-
-/* dst = AND over all clusters' cluster-common bitmaps */
+/* system-common = AND across clusters of cluster_free bitmaps */
 static inline void soc_daml_build_system_common_bitmap(void)
 {
-  uint32_t w;
-  uint32_t c;
+  /* init with all-ones in valid bits */
+  for (uint32_t w = 0; w < BITMAP_WORDS; ++w) {
+    g_hbm_system_common_bitmap[w] = 0xFFFFFFFFu;
+  }
+  if ((NUM_SLOTS & 31u) != 0u) {
+    uint32_t tail = NUM_SLOTS & 31u;
+    uint32_t mask = (1u << tail); mask = mask - 1u;
+    g_hbm_system_common_bitmap[BITMAP_WORDS - 1u] = mask; /* only valid bits set */
+  }
 
-  daml_bitmap_set_all_ones(&g_hbm_system_common_bitmap[0]);
-
-  for (c = 0; c < g_rt_num_clusters; c++) {
-    for (w = 0; w < BITMAP_WORDS; w++) {
-      uint32_t word = g_hbm_cluster_common_bitmap[c][w];
-      g_hbm_system_common_bitmap[w] &= word;
+  for (uint32_t c = 0; c < g_rt_num_clusters; ++c) {
+    for (uint32_t w = 0; w < BITMAP_WORDS; ++w) {
+      g_hbm_system_common_bitmap[w] &= g_hbm_cluster_free_bitmap[c][w];
     }
   }
 }
 
-/* Convert a bitmap to (addr,size) ranges for cluster cid */
-static inline void soc_daml_emit_cluster_ranges_from_bitmap(uint32_t cid)
+/* Compress final bitmap into contiguous slot ranges in bytes */
+static inline void soc_daml_system_common_bitmap_to_ranges(void)
 {
-  uint32_t out_cnt = 0u;
-  uint32_t slot = 0u;
-
-  g_hbm_cluster_common_count[cid] = 0u;
-  daml_zero_bytes(&g_hbm_cluster_common[cid][0], (uint32_t)sizeof(g_hbm_cluster_common[cid]));
-
-  while ((slot < NUM_SLOTS) && (out_cnt < MAX_COMMON_BLOCKS)) {
-    /* find next set bit */
-    uint32_t found = 0u;
-    uint32_t start_slot = 0u;
-
-    while (slot < NUM_SLOTS) {
-      uint32_t word_idx = slot >> 5;
-      uint32_t bit_idx  = slot & 31u;
-      uint32_t mask     = (1u << bit_idx);
-      uint32_t word     = g_hbm_cluster_common_bitmap[cid][word_idx];
-      if ((word & mask) != 0u) {
-        found = 1u;
-        start_slot = slot;
-        break;
-      }
-      slot = slot + 1u;
-    }
-
-    if (found == 0u) {
-      break;
-    }
-
-    /* extend run */
-    {
-      uint32_t end_slot = start_slot;
-      uint32_t cont = 1u;
-
-      while ((cont == 1u) && (end_slot + 1u < NUM_SLOTS)) {
-        uint32_t next = end_slot + 1u;
-        uint32_t widx = next >> 5;
-        uint32_t bidx = next & 31u;
-        uint32_t m    = (1u << bidx);
-        uint32_t wval = g_hbm_cluster_common_bitmap[cid][widx];
-        if ((wval & m) != 0u) {
-          end_slot = next;
-        } else {
-          cont = 0u;
-        }
-      }
-
-      /* emit range */
-      {
-        uint32_t start_addr = (uint32_t)HEAP_BASE + start_slot * SLOT_SIZE;
-        uint32_t end_addr   = (uint32_t)HEAP_BASE + (end_slot + 1u) * SLOT_SIZE;
-        g_hbm_cluster_common[cid][out_cnt].addr = (void*)(uintptr_t)start_addr;
-        g_hbm_cluster_common[cid][out_cnt].size = end_addr - start_addr;
-        out_cnt = out_cnt + 1u;
-      }
-
-      slot = end_slot + 1u;
-    }
-  }
-
-  g_hbm_cluster_common_count[cid] = out_cnt;
-}
-
-/* Convert the system common bitmap into ranges */
-static inline void soc_daml_emit_system_ranges_from_bitmap(void)
-{
-  uint32_t out_cnt = 0u;
-  uint32_t slot = 0u;
-
   g_hbm_system_common_count = 0u;
-  daml_zero_bytes(&g_hbm_system_common[0], (uint32_t)sizeof(g_hbm_system_common));
 
-  while ((slot < NUM_SLOTS) && (out_cnt < MAX_COMMON_BLOCKS)) {
-    uint32_t found = 0u;
-    uint32_t start_slot = 0u;
-
-    while (slot < NUM_SLOTS) {
-      uint32_t word_idx = slot >> 5;
-      uint32_t bit_idx  = slot & 31u;
-      uint32_t mask     = (1u << bit_idx);
-      uint32_t word     = g_hbm_system_common_bitmap[word_idx];
-      if ((word & mask) != 0u) {
-        found = 1u;
-        start_slot = slot;
-        break;
-      }
-      slot = slot + 1u;
+  uint32_t idx = 0u;     /* slot index */
+  while (idx < NUM_SLOTS && g_hbm_system_common_count < MAX_COMMON_BLOCKS) {
+    /* seek next 1 */
+    while (idx < NUM_SLOTS) {
+      uint32_t w = idx >> 5;
+      uint32_t b = idx & 31u;
+      if ( (g_hbm_system_common_bitmap[w] >> b) & 1u ) break;
+      idx++;
     }
+    if (idx >= NUM_SLOTS) break;
 
-    if (found == 0u) {
-      break;
+    /* accumulate run of 1s */
+    uint32_t run_start = idx;
+    while (idx < NUM_SLOTS) {
+      uint32_t w = idx >> 5;
+      uint32_t b = idx & 31u;
+      if ( ((g_hbm_system_common_bitmap[w] >> b) & 1u) == 0u ) break;
+      idx++;
     }
+    uint32_t run_end_excl = idx;
 
-    {
-      uint32_t end_slot = start_slot;
-      uint32_t cont = 1u;
+    /* convert to byte range */
+    uint32_t byte_lo = (uint32_t)HEAP_BASE + run_start * SLOT_SIZE;
+    uint32_t byte_hi = (uint32_t)HEAP_BASE + run_end_excl * SLOT_SIZE;
 
-      while ((cont == 1u) && (end_slot + 1u < NUM_SLOTS)) {
-        uint32_t next = end_slot + 1u;
-        uint32_t widx = next >> 5;
-        uint32_t bidx = next & 31u;
-        uint32_t m    = (1u << bidx);
-        uint32_t wval = g_hbm_system_common_bitmap[widx];
-        if ((wval & m) != 0u) {
-          end_slot = next;
-        } else {
-          cont = 0u;
-        }
-      }
-
-      {
-        uint32_t start_addr = (uint32_t)HEAP_BASE + start_slot * SLOT_SIZE;
-        uint32_t end_addr   = (uint32_t)HEAP_BASE + (end_slot + 1u) * SLOT_SIZE;
-        g_hbm_system_common[out_cnt].addr = (void*)(uintptr_t)start_addr;
-        g_hbm_system_common[out_cnt].size = end_addr - start_addr;
-        out_cnt = out_cnt + 1u;
-      }
-
-      slot = end_slot + 1u;
-    }
+    g_hbm_system_common[g_hbm_system_common_count].addr = (void*)(uintptr_t)byte_lo;
+    g_hbm_system_common[g_hbm_system_common_count].size = (byte_hi - byte_lo);
+    g_hbm_system_common_count++;
   }
-
-  g_hbm_system_common_count = out_cnt;
-}
-
-/* ============================================================
- *              PUBLIC ENTRY POINTS (bitmap workflow)
- * ============================================================ */
-
-/* Build per-core bitmaps from snapshots — call after snapshots are uploaded */
-static inline void soc_daml_build_all_core_bitmaps(void)
-{
-  uint32_t c;
-  uint32_t k;
-  for (c = 0; c < g_rt_num_clusters; c++) {
-    for (k = 0; k < g_rt_cores_per_cluster; k++) {
-      soc_daml_build_core_bitmap(c, k);
-    }
-  }
-}
-
-/* Build cluster-common bitmaps + convert to ranges */
-static inline void soc_daml_build_all_cluster_common_from_bitmaps(void)
-{
-  uint32_t c;
-  for (c = 0; c < g_rt_num_clusters; c++) {
-    soc_daml_build_cluster_common_bitmap(c);
-    soc_daml_emit_cluster_ranges_from_bitmap(c);
-  }
-}
-
-/* Build system-common bitmap + convert to ranges */
-static inline void soc_daml_build_system_common_from_bitmaps(void)
-{
-  soc_daml_build_system_common_bitmap();
-  soc_daml_emit_system_ranges_from_bitmap();
 }
 
 /* --------------------------
- * Getters (unchanged API)
+ * Getters
  * -------------------------- */
-static inline uint32_t soc_daml_get_core_free_count(uint32_t cid, uint32_t kid) {
-  if (cid < NUM_CLUSTERS && kid < CORES_PER_CLUSTER) {
-    return g_hbm_core_free_count[cid][kid];
-  }
-  return 0u;
-}
-static inline const daml_block_t* soc_daml_get_core_free(uint32_t cid, uint32_t kid) {
-  if (cid < NUM_CLUSTERS && kid < CORES_PER_CLUSTER) {
-    return &g_hbm_core_free[cid][kid][0];
-  }
-  return (const daml_block_t*)0;
-}
-static inline uint32_t soc_daml_get_cluster_common_count(uint32_t cid) {
-  if (cid < NUM_CLUSTERS) {
-    return g_hbm_cluster_common_count[cid];
-  }
-  return 0u;
-}
-static inline const daml_block_t* soc_daml_get_cluster_common(uint32_t cid) {
-  if (cid < NUM_CLUSTERS) {
-    return &g_hbm_cluster_common[cid][0];
-  }
-  return (const daml_block_t*)0;
-}
 static inline uint32_t soc_daml_get_system_common_count(void) {
   return g_hbm_system_common_count;
 }
