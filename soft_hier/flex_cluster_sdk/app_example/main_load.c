@@ -4,7 +4,7 @@
  * - No compute, no printf: clean timing of HBM->L1 + broadcast
  */
 #include <stdint.h>
-#include "runtime/include/fixed_proj.h"   /* brings: ARCH_*, masks, hbm_off_*, BYTES_*, etc. */
+#include "fixed_proj.h"   /* brings: ARCH_*, masks, hbm_off_*, BYTES_*, etc. */
 
 int main(void)
 {
