@@ -48,6 +48,7 @@ int main(void)
         printf("       A-strip bytes=%u, B-strip bytes=%u, C-tile bytes=%u\n",
                (unsigned)BYTES_A_STRIP, (unsigned)BYTES_B_STRIP, (unsigned)BYTES_C_TILE);
     }
+    flex_global_barrier_xy();
 
     /* --- Allocate identical L1 buffers on every cluster (core 0 only) --- */
     void *addr_a = (void*)0;
@@ -74,34 +75,48 @@ int main(void)
         a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
         b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
         c_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_c);
-        printf("[C%u,%u] L1 offsets: A=%u B=%u C=%u\n",
-               (unsigned)P.y, (unsigned)P.x, (unsigned)a_off, (unsigned)b_off, (unsigned)c_off);
+    }
+
+    /* Ordered print of L1 offsets: row-major C[y,x] */
+    for (uint32_t ry = 0; ry < 4u; ++ry) {
+        for (uint32_t rx = 0; rx < 4u; ++rx) {
+            flex_global_barrier_xy();
+            if (core == 0u && P.y == ry && P.x == rx) {
+                printf("[C%u,%u] L1 offsets: A=%u B=%u C=%u\n",
+                       (unsigned)P.y, (unsigned)P.x,
+                       (unsigned)a_off, (unsigned)b_off, (unsigned)c_off);
+            }
+        }
     }
     flex_global_barrier_xy();
 
-    /* --- Leaders load their strips from HBM once --- */
-    if (core == 0u) {
-        /* Row leader loads A strip with 1D DMA (contiguous block) */
-        if (P.x == 0u) {
-            const uint32_t r = P.y; /* 0..3 row index */
-            const uint32_t offA = hbm_off_A_strip(r);
-            printf("[Load][A] C[%u,%u] row-leader loads A-strip r=%u from HBM off=0x%08x bytes=%u\n",
-                   (unsigned)P.y, (unsigned)P.x, (unsigned)r, (unsigned)offA, (unsigned)BYTES_A_STRIP);
+    /* --- Leaders load their strips from HBM once (ordered) --- */
+
+    /* Row leaders load A in row order */
+    for (uint32_t ry = 0; ry < 4u; ++ry) {
+        flex_global_barrier_xy();
+        if (core == 0u && P.x == 0u && P.y == ry) {
+            const uint32_t offA = hbm_off_A_strip(ry);
+            printf("[Load][A] C[%u,0] loads A-strip r=%u from HBM off=0x%08x bytes=%u\n",
+                   (unsigned)ry, (unsigned)ry, (unsigned)offA, (unsigned)BYTES_A_STRIP);
             bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
             bare_dma_wait_all();
             printf("[Load][A] checksum=0x%08x\n", (unsigned)checksum_u32(addr_a, BYTES_A_STRIP));
         }
+    }
+    flex_global_barrier_xy();
 
-        /* Column leader loads B strip with 2D DMA (gather column-block) */
-        if (P.y == 0u) {
-            const uint32_t c = P.x; /* 0..3 col index */
-            const uint32_t offB_base = hbm_off_B_strip_base(c);
-            const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * ELEM_BYTES;    /* 64*4 */
-            const uint32_t dst_stride   = size_per_row;                            /* packed in L1 */
-            const uint32_t src_stride   = (uint32_t)MAT_N * ELEM_BYTES;            /* row-major in HBM */
-            const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                  /* 256 rows */
-            printf("[Load][B] C[%u,%u] col-leader loads B-strip c=%u from HBM base=0x%08x bytes/row=%u repeat=%u\n",
-                   (unsigned)P.y, (unsigned)P.x, (unsigned)c, (unsigned)offB_base,
+    /* Column leaders load B in column order */
+    for (uint32_t rx = 0; rx < 4u; ++rx) {
+        flex_global_barrier_xy();
+        if (core == 0u && P.y == 0u && P.x == rx) {
+            const uint32_t offB_base     = hbm_off_B_strip_base(rx);
+            const uint32_t size_per_row  = (uint32_t)B_STRIP_COLS * ELEM_BYTES; /* 64*4 */
+            const uint32_t dst_stride    = size_per_row;                         /* packed in L1 */
+            const uint32_t src_stride    = (uint32_t)MAT_N * ELEM_BYTES;         /* 256*4 */
+            const uint32_t repeat        = (uint32_t)B_STRIP_ROWS;               /* 256   */
+            printf("[Load][B] C[0,%u] loads B-strip c=%u from HBM base=0x%08x bytes/row=%u repeat=%u\n",
+                   (unsigned)rx, (unsigned)rx, (unsigned)offB_base,
                    (unsigned)size_per_row, (unsigned)repeat);
             bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
                               size_per_row, dst_stride, src_stride, repeat);
@@ -111,45 +126,60 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* --- Leaders broadcast strips across row (A) and column (B) --- */
-    if (core == 0u) {
-        if (P.x == 0u) {
-            const uint16_t row_m = mask_row(P.y);  /* select this row */
-            const uint16_t col_m = mask_all4();    /* all columns */
-            printf("[Bcast][A] from C[%u,0] -> row %u, bytes=%u (dst_off=%u, src_off=%u)\n",
-                   (unsigned)P.y, (unsigned)P.y, (unsigned)BYTES_A_STRIP, (unsigned)a_off, (unsigned)a_off);
+    /* --- Leaders broadcast their strips (ordered) --- */
+
+    /* A horizontally, row by row */
+    for (uint32_t ry = 0; ry < 4u; ++ry) {
+        flex_global_barrier_xy();
+        if (core == 0u && P.x == 0u && P.y == ry) {
+            const uint16_t row_m = mask_row(ry);
+            const uint16_t col_m = mask_all4();
+            printf("[Bcast][A] from C[%u,0] -> row %u, bytes=%u (off=%u)\n",
+                   (unsigned)ry, (unsigned)ry, (unsigned)BYTES_A_STRIP, (unsigned)a_off);
             flex_dma_async_broadcast(/*dst_off*/ a_off, /*src_off*/ a_off,
                                      BYTES_A_STRIP, row_m, col_m);
+            flex_dma_async_wait_all();
         }
-        if (P.y == 0u) {
-            const uint16_t row_m = mask_all4();    /* all rows */
-            const uint16_t col_m = mask_col(P.x);  /* select this column */
-            printf("[Bcast][B] from C[0,%u] -> col %u, bytes=%u (dst_off=%u, src_off=%u)\n",
-                   (unsigned)P.x, (unsigned)P.x, (unsigned)BYTES_B_STRIP, (unsigned)b_off, (unsigned)b_off);
-            flex_dma_async_broadcast(/*dst_off*/ b_off, /*src_off*/ b_off,
-                                     BYTES_B_STRIP, row_m, col_m);
-        }
-        flex_dma_async_wait_all();
     }
     flex_global_barrier_xy();
 
-    /* --- Compute C tile and store to HBM --- */
-    if (core == 0u) {
-        printf("[Compute] C[%u,%u] matmul...\n", (unsigned)P.y, (unsigned)P.x);
-        matmul_tile_fp32((const float*)addr_a, (const float*)addr_b, (float*)addr_c);
-        printf("[Compute] done. checksum(C)=0x%08x\n", (unsigned)checksum_u32(addr_c, BYTES_C_TILE));
+    /* B vertically, column by column */
+    for (uint32_t rx = 0; rx < 4u; ++rx) {
+        flex_global_barrier_xy();
+        if (core == 0u && P.y == 0u && P.x == rx) {
+            const uint16_t row_m = mask_all4();
+            const uint16_t col_m = mask_col(rx);
+            printf("[Bcast][B] from C[0,%u] -> col %u, bytes=%u (off=%u)\n",
+                   (unsigned)rx, (unsigned)rx, (unsigned)BYTES_B_STRIP, (unsigned)b_off);
+            flex_dma_async_broadcast(/*dst_off*/ b_off, /*src_off*/ b_off,
+                                     BYTES_B_STRIP, row_m, col_m);
+            flex_dma_async_wait_all();
+        }
+    }
+    flex_global_barrier_xy();
 
-        /* Store C tile via 2D to its place in HBM */
-        const uint32_t offC = hbm_off_C_tile(P.y, P.x);
-        const uint32_t size_row = (uint32_t)C_TILE_COLS * ELEM_BYTES; /* 64*4 */
-        const uint32_t dst_str  = (uint32_t)MAT_N * ELEM_BYTES;       /* 256*4 */
-        const uint32_t src_str  = size_row;                           /* packed in L1 */
-        const uint32_t reps     = (uint32_t)C_TILE_ROWS;              /* 64      */
-        printf("[Store] C[%u,%u] -> HBM off=0x%08x, bytes/row=%u, reps=%u\n",
-               (unsigned)P.y, (unsigned)P.x, (unsigned)offC, (unsigned)size_row, (unsigned)reps);
-        bare_dma_start_2d(/*dst*/ hbm_addr(offC), /*src*/ local(c_off),
-                          size_row, dst_str, src_str, reps);
-        bare_dma_wait_all();
+    /* --- Compute each C tile and store (ordered, row-major) --- */
+    for (uint32_t ry = 0; ry < 4u; ++ry) {
+        for (uint32_t rx = 0; rx < 4u; ++rx) {
+            flex_global_barrier_xy();
+            if (core == 0u && P.y == ry && P.x == rx) {
+                printf("[Compute] C[%u,%u] matmul...\n", (unsigned)ry, (unsigned)rx);
+                matmul_tile_fp32((const float*)addr_a, (const float*)addr_b, (float*)addr_c);
+                printf("[Compute] C[%u,%u] done. checksum=0x%08x\n",
+                       (unsigned)ry, (unsigned)rx, (unsigned)checksum_u32(addr_c, BYTES_C_TILE));
+
+                const uint32_t offC     = hbm_off_C_tile(ry, rx);
+                const uint32_t size_row = (uint32_t)C_TILE_COLS * ELEM_BYTES; /* 64*4 */
+                const uint32_t dst_str  = (uint32_t)MAT_N * ELEM_BYTES;       /* 256*4 */
+                const uint32_t src_str  = size_row;                           /* packed in L1 */
+                const uint32_t reps     = (uint32_t)C_TILE_ROWS;              /* 64      */
+                printf("[Store]   C[%u,%u] -> HBM off=0x%08x, bytes/row=%u, reps=%u\n",
+                       (unsigned)ry, (unsigned)rx, (unsigned)offC, (unsigned)size_row, (unsigned)reps);
+                bare_dma_start_2d(/*dst*/ hbm_addr(offC), /*src*/ local(c_off),
+                                  size_row, dst_str, src_str, reps);
+                bare_dma_wait_all();
+            }
+        }
     }
     flex_global_barrier_xy();
 
