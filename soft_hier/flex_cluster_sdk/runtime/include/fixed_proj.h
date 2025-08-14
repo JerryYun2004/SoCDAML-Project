@@ -5,6 +5,12 @@
 #define FIXED_PROJ_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include "flex_cluster_arch.h"
+#include "flex_runtime.h"
+#include "flex_alloc.h"
+#include "flex_printf.h"
+#include "flex_dma_pattern.h"
 
 /* -----------------------------------------------------------
  * Problem dimensions (FP32)
