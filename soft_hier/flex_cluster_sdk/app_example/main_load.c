@@ -1,99 +1,99 @@
-/* main_load.c — HBM→L1 load test with row/col broadcast (no prints) */
-
+/* Load-only microbenchmark (broadcast):
+ * - C[x,0] loads A-row strip r=y from HBM, broadcasts along its row
+ * - C[0,y] loads B-col strip c=x from HBM, broadcasts along its column
+ * - No compute, no printf: clean timing of HBM->L1 + broadcast
+ */
 #include <stdint.h>
-#include "flex_runtime.h"
-#include "flex_dma_pattern.h"
-#include "fixed_proj.h"
-#include "soc_daml.h"
-
-static inline void ml_zero32(void *dst, uint32_t bytes)
-{
-    volatile uint32_t *p = (volatile uint32_t *)dst;
-    for (uint32_t i = 0; i < (bytes >> 2); ++i) p[i] = 0u;
-}
+#include "runtime/include/fixed_proj.h"   /* brings: ARCH_*, masks, hbm_off_*, BYTES_*, etc. */
 
 int main(void)
 {
+    /* Global init that every core must perform */
     flex_barrier_xy_init();
+    flex_global_barrier_xy();
     flex_alloc_init();
     flex_global_barrier_xy();
 
     const uint32_t cid  = flex_get_cluster_id();
     const uint32_t core = flex_get_core_id();
-    const FlexPosition P = get_pos(cid);
-    const uint32_t cx = P.x;  /* 0..3 */
-    const uint32_t cy = P.y;  /* 0..3 */
+    const FlexPosition P = get_pos(cid);   /* P.x in [0..3], P.y in [0..3] */
 
-    /* DM core allocates L1 slots for A/B. */
-    void *addr_a = 0, *addr_b = 0;
-    uint32_t a_off = 0, b_off = 0;
-
-    if (core == 0) {
-        /* +64 to ensure we can 64B-align the usable region. */
-        addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);
-        addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
-
-        if (!addr_a || !addr_b) {
-            flex_eoc(1);
-        }
-
-        a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
-        b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
-
-        /* 64B align the working offsets (avoid helper name collisions). */
-        a_off = (a_off + 63u) & ~63u;
-        b_off = (b_off + 63u) & ~63u;
-
-        /* Clear destinations (optional; helps catch stale data internally). */
-        ml_zero32((void*)local(a_off), BYTES_A_STRIP);
-        ml_zero32((void*)local(b_off), BYTES_B_STRIP);
-    }
-    flex_global_barrier_xy();
-
-    /* Leaders load from HBM (DM core only). */
-    if (core == 0) {
-        /* Row leaders (cx==0) load A-row strip (contiguous). */
-        if (cx == 0u) {
-            const uint32_t offA = hbm_off_A_strip(cy); /* 64x256 fp32 = 64*256*4 */
-            bare_dma_start_1d(local(a_off), hbm_addr(offA), BYTES_A_STRIP);
-            bare_dma_wait_all();
-        }
-
-        /* Column leaders (cy==0) load B-column strip (2D gather). */
-        if (cy == 0u) {
-            const uint32_t baseB       = hbm_off_B_strip_base(cx);
-            const uint32_t size_per_row = TILE * ELEM_BYTES;   /* 64*4 */
-            const uint32_t dst_stride   = size_per_row;        /* tightly packed in L1 */
-            const uint32_t src_stride   = MAT_N * ELEM_BYTES;  /* 256*4 in HBM */
-            bare_dma_start_2d(local(b_off), hbm_addr(baseB),
-                              size_per_row, dst_stride, src_stride, MAT_N);
-            bare_dma_wait_all();
-        }
-    }
-    /* Ensure all leaders finished HBM reads before any broadcast starts. */
-    flex_global_barrier_xy();
-
-    /* Inter-cluster broadcast (DM core only). */
-    if (core == 0) {
-        /* Row broadcast of A from (cx==0) across columns. */
-        if (cx == 0u) {
-            const uint16_t row_m = mask_row(cy);
-            const uint16_t col_m = mask_all4();   /* to all columns */
-            flex_dma_async_broadcast(a_off, a_off, BYTES_A_STRIP, row_m, col_m);
-        }
-        /* Column broadcast of B from (cy==0) across rows. */
-        if (cy == 0u) {
-            const uint16_t row_m = mask_all4();   /* to all rows    */
-            const uint16_t col_m = mask_col(cx);
-            flex_dma_async_broadcast(b_off, b_off, BYTES_B_STRIP, row_m, col_m);
-        }
-        flex_dma_async_wait_all();
+    /* Only core 0 in each cluster continues; others exit now to avoid touching DMA/L1 */
+    if (core != 0u) {
+        flex_eoc(0);
+        return 0;
     }
 
-    /* All clusters must wait until both row/column broadcasts are done. */
+    /* -------- L1 allocations (shared per cluster; only DM core allocates) -------- */
+    void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for alignment headroom */
+    void *addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
+
+    if (addr_a == 0 || addr_b == 0) {
+        /* Out of L1: abort this cluster safely */
+        flex_eoc(1);
+        return 0;
+    }
+
+    /* Compute 64B-aligned TCDM offsets to use with DMA/broadcast helpers */
+    uint32_t a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
+    uint32_t b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
+    a_off = align_up_u32(a_off, 64u);
+    b_off = align_up_u32(b_off, 64u);
+
+    /* Optional: clear destination buffers (not required for the benchmark)
+       zero_f32((void *)(local(a_off)), BYTES_A_STRIP);
+       zero_f32((void *)(local(b_off)), BYTES_B_STRIP);
+    */
+
+    /* -------- Leaders pull from HBM -------- */
+    /* A-strip: row leader of each row (x==0) pulls its row's 64x256 */
+    if (P.x == 0u) {
+        const uint32_t r = P.y; /* 0..3 -> A1..A4 row strips */
+        const uint32_t h_off = hbm_off_A_strip(r);
+        bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(h_off), /*bytes*/ BYTES_A_STRIP);
+        bare_dma_wait_all();
+    }
+
+    /* B-strip: column leader of each column (y==0) pulls its column's 256x64 (strided) */
+    if (P.y == 0u) {
+        const uint32_t c = P.x; /* 0..3 -> B1..B4 col strips */
+        const uint32_t base = hbm_off_B_strip_base(c);
+        const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * (uint32_t)ELEM_BYTES;   /* 64*4 */
+        const uint32_t dst_stride   = size_per_row;                                     /* packed */
+        const uint32_t src_stride   = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES;           /* 256*4 */
+        const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                            /* 256    */
+        bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(base),
+                          /*rowSize*/ size_per_row, /*dstStride*/ dst_stride,
+                          /*srcStride*/ src_stride, /*rows*/ repeat);
+        bare_dma_wait_all();
+    }
+
+    /* Make sure all leaders finished HBM pulls before broadcasting */
     flex_global_barrier_xy();
 
-    /* Done: no compute, no store, just load/broadcast timing. */
+    /* -------- Inter-cluster broadcast (only leaders initiate) -------- */
+    /* Broadcast A along rows: row mask = this row, col mask = all cols */
+    if (P.x == 0u) {
+        const uint16_t row_m = mask_row(P.y);   /* select row P.y */
+        const uint16_t col_m = mask_all4();     /* all columns     */
+        flex_dma_async_broadcast(/*dst_off*/ a_off, /*src_off*/ a_off,
+                                 /*bytes*/ BYTES_A_STRIP, row_m, col_m);
+    }
+
+    /* Broadcast B along columns: row mask = all rows, col mask = this col */
+    if (P.y == 0u) {
+        const uint16_t row_m = mask_all4();     /* all rows        */
+        const uint16_t col_m = mask_col(P.x);   /* select col P.x  */
+        flex_dma_async_broadcast(/*dst_off*/ b_off, /*src_off*/ b_off,
+                                 /*bytes*/ BYTES_B_STRIP, row_m, col_m);
+    }
+
+    /* Wait for both A- and B-broadcasts (if any were launched by this cluster) */
+    flex_dma_async_wait_all();
+
+    /* Ensure everyone has the strips before ending */
+    flex_global_barrier_xy();
+
     flex_eoc(0);
     return 0;
 }
