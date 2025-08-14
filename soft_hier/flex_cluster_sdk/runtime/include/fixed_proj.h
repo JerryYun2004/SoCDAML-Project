@@ -51,9 +51,9 @@
 #endif
 
 /* ===========================================================
- * HBM base offsets — inside the heap (avoid segfault)
- *   Heap prints show start at 0xC0000400 → offset 0x00000400.
- *   Place A, then B right after A, then C after B.
+ * HBM base offsets — choose addresses INSIDE the heap
+ * Your heap banner says: HBM heap start = 0xC0000400
+ * So offsets must be >= 0x00000400, and comfortably within size.
  * =========================================================== */
 #ifndef HBM_A_BASE_OFFSET
 #define HBM_A_BASE_OFFSET   (0x00000400u) /* heap start offset */
@@ -68,7 +68,6 @@
 /* Row-major offsets into big A/B/C stored in HBM */
 static inline uint32_t hbm_off_A_strip(uint32_t r)
 {
-    /* A strip r: rows r*TILE .. r*TILE+TILE-1, full N columns */
     uint32_t rows_before  = r * A_STRIP_ROWS;     /* r*TILE */
     uint32_t elems_before = rows_before * MAT_N;  /* r*TILE*N */
     return HBM_A_BASE_OFFSET + elems_before * ELEM_BYTES;
@@ -117,6 +116,18 @@ static inline uint32_t tcdm_offset_from_ptr(uint32_t tcdm_base, const void *ptr)
 /* ===========================================================
  * Small utils
  * =========================================================== */
+static inline uint32_t align_up_u32(uint32_t v, uint32_t a /* power of 2 */)
+{
+    return (v + (a - 1u)) & ~(a - 1u);
+}
+
+static inline void *align_up_ptr(void *p, uint32_t a /* power of 2 */)
+{
+    uint32_t v  = (uint32_t)(uintptr_t)p;
+    uint32_t va = align_up_u32(v, a);
+    return (void *)(uintptr_t)va;
+}
+
 static inline void zero_f32(void *dst, uint32_t n_bytes)
 {
     uint32_t *p = (uint32_t *)dst;
