@@ -21,6 +21,54 @@ static void matmul_tile_fp32(const float *A, const float *B, float *C)
     }
 }
 
+/* ---- Initialize full A (256x256) and B (256x256) in HBM (once on C[0,0] DM) ---- */
+static void init_hbm_A_and_B_once(void)
+{
+    const uint32_t IS_DM = flex_is_dm_core();
+    const uint32_t cid   = flex_get_cluster_id();
+    const FlexPosition P = get_pos(cid);
+
+    if (!(IS_DM && P.x == 0u && P.y == 0u)) {
+        return;
+    }
+
+    const uint32_t ALIGN_DMA   = 64u;
+    const uint32_t ROW_BYTES   = MAT_N * ELEM_BYTES; /* 256*4 = 1024 */
+    void *rowbuf_raw = flex_l1_malloc(ROW_BYTES + ALIGN_DMA);
+    if (rowbuf_raw == (void*)0) {
+        printf("[InitHBM] ERROR: L1 row buffer alloc failed\n");
+        flex_eoc(1);
+        return;
+    }
+    void *rowbuf     = align_up_ptr(rowbuf_raw, ALIGN_DMA);
+    uint32_t row_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, rowbuf);
+
+    /* Fill A rows */
+    for (uint32_t r = 0; r < MAT_N; ++r) {
+        float *pf = (float*)(uintptr_t)local(row_off);
+        for (uint32_t c = 0; c < MAT_N; ++c) {
+            /* Non-zero, deterministic pattern */
+            pf[c] = (float)(r + 1u) * 0.001f + (float)(c + 1u) * 0.002f;
+        }
+        const uint32_t offA_row = HBM_A_BASE_OFFSET + r * ROW_BYTES;
+        bare_dma_start_1d(/*dst*/ hbm_addr(offA_row), /*src*/ local(row_off), ROW_BYTES);
+        bare_dma_wait_all();
+    }
+
+    /* Fill B rows */
+    for (uint32_t r = 0; r < MAT_N; ++r) {
+        float *pf = (float*)(uintptr_t)local(row_off);
+        for (uint32_t c = 0; c < MAT_N; ++c) {
+            pf[c] = (float)(r + 1u) * 0.003f + (float)(c + 1u) * 0.004f;
+        }
+        const uint32_t offB_row = HBM_B_BASE_OFFSET + r * ROW_BYTES;
+        bare_dma_start_1d(/*dst*/ hbm_addr(offB_row), /*src*/ local(row_off), ROW_BYTES);
+        bare_dma_wait_all();
+    }
+
+    printf("[InitHBM] A and B initialized in HBM\n");
+}
+
 int main(void)
 {
     /* --- Bring-up and global sync --- */
@@ -46,9 +94,12 @@ int main(void)
     }
     flex_global_barrier_xy();
 
+    /* --- Initialize A and B in HBM once on C[0,0] DM --- */
+    init_hbm_A_and_B_once();
+    flex_global_barrier_xy();
+
     /* ===========================================================
      * Allocate L1 on DM core only. Over-allocate and 64-align.
-     * Other cores will use local(offset) if they ever need pointers.
      * =========================================================== */
     void *addr_a_raw = (void*)0, *addr_b_raw = (void*)0, *addr_c_raw = (void*)0;
     void *addr_a     = (void*)0, *addr_b     = (void*)0, *addr_c     = (void*)0;
@@ -94,9 +145,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* ===========================================================
-     * HBM loads (DM cores only), ordered by rows/cols
-     * =========================================================== */
+    /* ==================== Load leaders (DM), ordered ==================== */
 
     /* Row leaders load A (contiguous 1D) */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
@@ -117,10 +166,10 @@ int main(void)
         flex_global_barrier_xy();
         if (IS_DM && P.y == 0u && P.x == rx) {
             const uint32_t offB_base     = hbm_off_B_strip_base(rx);
-            const uint32_t size_per_row  = (uint32_t)B_STRIP_COLS * ELEM_BYTES; /* 64*4 = 256  */
-            const uint32_t dst_stride    = size_per_row;                         /* packed L1   */
-            const uint32_t src_stride    = (uint32_t)MAT_N * ELEM_BYTES;         /* 256*4 = 1024 */
-            const uint32_t repeat        = (uint32_t)B_STRIP_ROWS;               /* 256 rows    */
+            const uint32_t size_per_row  = (uint32_t)B_STRIP_COLS * ELEM_BYTES; /* 64*4 */
+            const uint32_t dst_stride    = size_per_row;                         /* packed L1 */
+            const uint32_t src_stride    = (uint32_t)MAT_N * ELEM_BYTES;         /* 256*4 */
+            const uint32_t repeat        = (uint32_t)B_STRIP_ROWS;               /* 256 rows */
             printf("[Load][B] C[0,%u](DM) loads B-strip c=%u from HBM base=0x%08x bytes/row=%u repeat=%u\n",
                    (unsigned)rx, (unsigned)rx, (unsigned)offB_base,
                    (unsigned)size_per_row, (unsigned)repeat);
@@ -132,9 +181,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* ===========================================================
-     * Broadcasts (DM cores only), ordered
-     * =========================================================== */
+    /* ==================== Broadcasts (DM), ordered ==================== */
 
     /* A horizontally, row by row */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
@@ -166,9 +213,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* ===========================================================
-     * Compute and store (DM cores only), ordered row-major
-     * =========================================================== */
+    /* ==================== Compute & Store (DM), ordered ==================== */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
             flex_global_barrier_xy();
