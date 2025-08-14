@@ -51,15 +51,15 @@
 #endif
 
 /* ===========================================================
- * HBM base offsets — choose addresses INSIDE the heap
- * Your heap banner says: HBM heap start = 0xC0000400
- * So offsets must be >= 0x00000400, and comfortably within size.
+ * HBM base offsets — inside your heap
+ * Heap banner shows start at 0xC0000400 ⇒ offset 0x00000400.
+ * Place A at heap start; B after A; C after B.
  * =========================================================== */
 #ifndef HBM_A_BASE_OFFSET
-#define HBM_A_BASE_OFFSET   (0x00000400u) /* heap start offset */
+#define HBM_A_BASE_OFFSET   (0x00000400u)
 #endif
 #ifndef HBM_B_BASE_OFFSET
-#define HBM_B_BASE_OFFSET   (HBM_A_BASE_OFFSET + (MAT_N*MAT_N*ELEM_BYTES)) /* +256*256*4 */
+#define HBM_B_BASE_OFFSET   (HBM_A_BASE_OFFSET + (MAT_N*MAT_N*ELEM_BYTES))
 #endif
 #ifndef HBM_C_BASE_OFFSET
 #define HBM_C_BASE_OFFSET   (HBM_B_BASE_OFFSET + (MAT_N*MAT_N*ELEM_BYTES))
