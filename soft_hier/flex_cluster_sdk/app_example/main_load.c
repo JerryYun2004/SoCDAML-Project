@@ -4,7 +4,11 @@
  * - No compute, no printf: clean timing of HBM->L1 + broadcast
  */
 #include <stdint.h>
-#include "fixed_proj.h"   /* brings: ARCH_*, masks, hbm_off_*, BYTES_*, etc. */
+#include "flex_runtime.h"
+#include "flex_printf.h"
+#include "flex_alloc.h"
+#include "flex_dma_pattern.h"
+#include "fixed_proj.h"  /* brings: ARCH_*, masks, hbm_off_*, BYTES_*, etc. */
 
 int main(void)
 {
