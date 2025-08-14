@@ -2,8 +2,6 @@
 #define FIXED_PROJ_H
 
 #include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
 #include "flex_runtime.h"       // for FlexPosition, local(), hbm_addr(), barriers, ARCH_* macros
 #include "flex_alloc.h"         // for flex_l1_malloc, flex_alloc_init
 #include "flex_dma_pattern.h"   // for DMA/broadcast functions
