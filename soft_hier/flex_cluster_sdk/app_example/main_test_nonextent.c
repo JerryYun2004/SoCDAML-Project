@@ -21,6 +21,53 @@ static void matmul_tile_fp32(const float *A, const float *B, float *C)
     }
 }
 
+/* ---- same HBM A/B initializer (once on C[0,0] DM) ---- */
+static void init_hbm_A_and_B_once(void)
+{
+    const uint32_t IS_DM = flex_is_dm_core();
+    const uint32_t cid   = flex_get_cluster_id();
+    const FlexPosition P = get_pos(cid);
+
+    if (!(IS_DM && P.x == 0u && P.y == 0u)) {
+        return;
+    }
+
+    const uint32_t ALIGN_DMA   = 64u;
+    const uint32_t ROW_BYTES   = MAT_N * ELEM_BYTES; /* 256*4 = 1024 */
+    void *rowbuf_raw = flex_l1_malloc(ROW_BYTES + ALIGN_DMA);
+    if (rowbuf_raw == (void*)0) {
+        printf("[InitHBM] ERROR: L1 row buffer alloc failed\n");
+        flex_eoc(1);
+        return;
+    }
+    void *rowbuf     = align_up_ptr(rowbuf_raw, ALIGN_DMA);
+    uint32_t row_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, rowbuf);
+
+    /* Fill A rows */
+    for (uint32_t r = 0; r < MAT_N; ++r) {
+        float *pf = (float*)(uintptr_t)local(row_off);
+        for (uint32_t c = 0; c < MAT_N; ++c) {
+            pf[c] = (float)(r + 1u) * 0.001f + (float)(c + 1u) * 0.002f;
+        }
+        const uint32_t offA_row = HBM_A_BASE_OFFSET + r * ROW_BYTES;
+        bare_dma_start_1d(/*dst*/ hbm_addr(offA_row), /*src*/ local(row_off), ROW_BYTES);
+        bare_dma_wait_all();
+    }
+
+    /* Fill B rows */
+    for (uint32_t r = 0; r < MAT_N; ++r) {
+        float *pf = (float*)(uintptr_t)local(row_off);
+        for (uint32_t c = 0; c < MAT_N; ++c) {
+            pf[c] = (float)(r + 1u) * 0.003f + (float)(c + 1u) * 0.004f;
+        }
+        const uint32_t offB_row = HBM_B_BASE_OFFSET + r * ROW_BYTES;
+        bare_dma_start_1d(/*dst*/ hbm_addr(offB_row), /*src*/ local(row_off), ROW_BYTES);
+        bare_dma_wait_all();
+    }
+
+    printf("[InitHBM] A and B initialized in HBM\n");
+}
+
 int main(void)
 {
     /* --- Bring-up and global sync --- */
@@ -46,14 +93,17 @@ int main(void)
     }
     flex_global_barrier_xy();
 
+    /* --- Initialize A and B in HBM once on C[0,0] DM --- */
+    init_hbm_A_and_B_once();
+    flex_global_barrier_xy();
+
     /* ===========================================================
      * Allocate L1 on DM core only. Over-allocate and 64-align.
-     * Other cores just participate in barriers for ordering.
      * =========================================================== */
     void *addr_a_raw = (void*)0, *addr_b_raw = (void*)0, *addr_c_raw = (void*)0;
     void *addr_a     = (void*)0, *addr_b     = (void*)0, *addr_c     = (void*)0;
     uint32_t a_off   = 0u, b_off = 0u, c_off = 0u;
-    const uint32_t   ALIGN_DMA = 64u;  /* safe alignment for iDMA */
+    const uint32_t   ALIGN_DMA = 64u;
 
     if (IS_DM) {
         addr_a_raw = flex_l1_malloc(BYTES_A_STRIP + ALIGN_DMA);
@@ -66,17 +116,14 @@ int main(void)
             flex_eoc(1); return 1;
         }
 
-        /* 64-align user pointers for DMA destinations/sources */
         addr_a = align_up_ptr(addr_a_raw, ALIGN_DMA);
         addr_b = align_up_ptr(addr_b_raw, ALIGN_DMA);
         addr_c = align_up_ptr(addr_c_raw, ALIGN_DMA);
 
-        /* Compute TCDM offsets from aligned pointers (for DMA) */
         a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
         b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
         c_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_c);
 
-        /* Clear C tile */
         zero_f32(addr_c, BYTES_C_TILE);
     }
     flex_global_barrier_xy();
@@ -101,7 +148,7 @@ int main(void)
      *     2) Loads B-strip c=rx from HBM with 2D gather
      *     3) Computes C tile locally
      *     4) Stores C tile to HBM with 2D
-     * We serialize clusters (row-major) for clean logs.
+     * Ordered row-major for clean logs.
      * =========================================================== */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
@@ -109,7 +156,8 @@ int main(void)
 
             if (IS_DM && P.y == ry && P.x == rx) {
                 /* --- 1) Load A-strip r=ry (contiguous 1D) --- */
-                const uint32_t offA = hbm_off_A_strip(ry);
+                const uint32_t offA = HBM_A_BASE_OFFSET + ry * (MAT_N * ELEM_BYTES) * A_STRIP_ROWS;
+                /* same as hbm_off_A_strip(ry), expanded for clarity */
                 printf("[Load][A] C[%u,%u](DM) loads A-strip r=%u from HBM off=0x%08x bytes=%u\n",
                        (unsigned)ry, (unsigned)rx, (unsigned)ry, (unsigned)offA, (unsigned)BYTES_A_STRIP);
                 bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
