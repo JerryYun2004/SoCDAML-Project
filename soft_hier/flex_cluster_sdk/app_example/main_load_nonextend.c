@@ -1,114 +1,92 @@
-// main_load_direct.c
+// main_direct_load.c
 #include <stdint.h>
-#include "fixed_proj.h"
 #include "flex_runtime.h"
 #include "flex_alloc.h"
+#include "flex_printf.h"
 #include "flex_dma_pattern.h"
 
-// -------- cycle counter (portable for RV) --------
-static inline uint64_t rdcycle64(void) {
-    uint32_t hi1, lo, hi2;
-    asm volatile ("rdcycleh %0" : "=r"(hi1));
-    asm volatile ("rdcycle  %0" : "=r"(lo));
-    asm volatile ("rdcycleh %0" : "=r"(hi2));
-    if (hi1 != hi2) {
-        asm volatile ("rdcycleh %0" : "=r"(hi1));
-        asm volatile ("rdcycle  %0" : "=r"(lo));
-        asm volatile ("rdcycleh %0" : "=r"(hi2));
-    }
-    return (((uint64_t)hi2) << 32) | lo;
-}
+#define MAT_N         (256u)
+#define TILE          (64u)
+#define ELEM_BYTES    (4u)
+#define BYTES_A_STRIP (TILE * MAT_N * ELEM_BYTES)   /* 64x256 */
+#define BYTES_B_STRIP (MAT_N * TILE * ELEM_BYTES)   /* 256x64 */
 
-__attribute__((section(".hbm"))) static volatile uint64_t g_cycles[ARCH_NUM_CLUSTER];
+#define HBM_A_BASE    (0x00000400u)
+#define HBM_B_BASE    (0x00040400u)
+
+static inline uint32_t hbm_off_A_strip(uint32_t r) { return HBM_A_BASE + r * BYTES_A_STRIP; }
+static inline uint32_t hbm_off_B_strip_base(uint32_t c) { return HBM_B_BASE + (c * TILE) * ELEM_BYTES; }
+
+static inline uint32_t tcdm_off(void *p) { return ((uint32_t)(uintptr_t)p) - (uint32_t)ARCH_CLUSTER_TCDM_BASE; }
+static inline uint32_t add32_sum(const void *ptr, uint32_t n_bytes) {
+    const uint32_t *p = (const uint32_t*)ptr; uint32_t n = n_bytes >> 2, s = 0u;
+    for (uint32_t i = 0; i < n; ++i) s += p[i]; return s;
+}
+static inline uint32_t rdcycle32(void){ uint32_t c; asm volatile("csrr %0, mcycle" : "=r"(c)); return c; }
 
 int main(void)
 {
     flex_barrier_xy_init();
+    flex_alloc_init();
     flex_global_barrier_xy();
 
     const uint32_t cid  = flex_get_cluster_id();
     const uint32_t core = flex_get_core_id();
-    const FlexPosition P = get_pos(cid);
+    const uint32_t nx   = flex_get_barrier_num_cluster_x();
+    const uint32_t ny   = flex_get_barrier_num_cluster_y();
+    const uint32_t cx   = cid % nx;
+    const uint32_t cy   = cid / nx;
 
     if (cid == 0 && core == 0) {
-        printf("[Info][NONEXT] Timing per-cluster HBM loads (no broadcast)\n");
-        printf("       Grid=(%u x %u), cores/cluster=%u\n",
-               ARCH_NUM_CLUSTER_X, ARCH_NUM_CLUSTER_Y, ARCH_NUM_CORE_PER_CLUSTER);
-        printf("       N=%u, TILE=%u, elem_bytes=%u\n", MAT_N, TILE, ELEM_BYTES);
-        printf("       A-strip bytes=%u, B-strip bytes=%u\n", BYTES_A_STRIP, BYTES_B_STRIP);
+        printf("[Info][NONEXT] HBM->L1 load test (no broadcast)\n");
+        printf("       Grid=(%u x %u), cores/cluster=%u\n", nx, ny, ARCH_NUM_CORE_PER_CLUSTER);
     }
+    flex_global_barrier_xy();
 
-    // ---- Allocate L1 buffers (DM core only) ----
     void *addr_a = 0, *addr_b = 0;
-    if (core == 0) {
+    if (flex_is_dm_core()) {
         addr_a = flex_l1_malloc(BYTES_A_STRIP);
         addr_b = flex_l1_malloc(BYTES_B_STRIP);
         if (!addr_a || !addr_b) {
-            printf("[ERR][NONEXT][C%u] L1 malloc failed A=%p B=%p\n", cid, addr_a, addr_b);
-            flex_eoc(1);
-            return 1;
+            printf("[ERR][C%u] L1 malloc failed A=%p B=%p\n", cid, addr_a, addr_b);
+            flex_eoc(1); return 1;
         }
-        zero_f32(addr_a, BYTES_A_STRIP);
-        zero_f32(addr_b, BYTES_B_STRIP);
     }
     flex_global_barrier_xy();
 
-    // Offsets (cluster-local)
-    uint32_t a_off = 0, b_off = 0;
-    if (core == 0) {
-        a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
-        b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
-    }
-    flex_global_barrier_xy();
+    if (flex_is_dm_core()) {
+        const uint32_t a_off = tcdm_off(addr_a);
+        const uint32_t b_off = tcdm_off(addr_b);
 
-    // ---- Start timing: each cluster loads its own A and B from HBM ----
-    uint64_t t0 = 0, t1 = 0;
-    if (core == 0) t0 = rdcycle64();
-    flex_global_barrier_xy();
-
-    if (core == 0) {
-        // A_r for our row r=P.y (1D contiguous)
-        const uint32_t r = P.y;
-        const uint32_t a_h = hbm_off_A_strip(r);
+        /* A: 1D contiguous copy for our row strip */
+        const uint32_t a_h = hbm_off_A_strip(cy);
+        uint32_t t0 = rdcycle32();
         bare_dma_start_1d(local(a_off), hbm_addr(a_h), BYTES_A_STRIP);
         bare_dma_wait_all();
 
-        // B_c for our column c=P.x (2D strided)
-        const uint32_t c = P.x;
-        const uint32_t b_h = hbm_off_B_strip_base(c);
-        const uint32_t size_per_row = (B_STRIP_COLS*ELEM_BYTES); // 64*4
-        const uint32_t dst_stride   = (B_STRIP_COLS*ELEM_BYTES); // 64*4
-        const uint32_t src_stride   = (MAT_N       *ELEM_BYTES); // 256*4
-        const uint32_t repeat       = (B_STRIP_ROWS);            // 256
-        bare_dma_start_2d(local(b_off), hbm_addr(b_h),
-                          size_per_row, dst_stride, src_stride, repeat);
+        /* B: 2D copy for our column block */
+        const uint32_t b_h = hbm_off_B_strip_base(cx);
+        const size_t   size_per_row = TILE * ELEM_BYTES;
+        const size_t   dst_stride   = TILE * ELEM_BYTES;
+        const size_t   src_stride   = MAT_N * ELEM_BYTES;
+        bare_dma_start_2d(local(b_off), hbm_addr(b_h), size_per_row, dst_stride, src_stride, MAT_N);
         bare_dma_wait_all();
-    }
-    flex_global_barrier_xy();
+        uint32_t t1 = rdcycle32();
 
-    if (core == 0) {
-        t1 = rdcycle64();
-        g_cycles[cid] = (t1 - t0);
-    }
-    flex_global_barrier_xy();
-
-    // ---- Ordered printing so logs are readable ----
-    if (cid == 0 && core == 0) {
-        printf("[Result][NONEXT] per-cluster cycles to obtain A/B in L1 (all load from HBM):\n");
-    }
-    for (uint32_t ry = 0; ry < ARCH_NUM_CLUSTER_Y; ++ry) {
-        for (uint32_t rx = 0; rx < ARCH_NUM_CLUSTER_X; ++rx) {
-            flex_global_barrier_xy();
-            if (core == 0 && P.x == rx && P.y == ry) {
-                printf("  C[%u,%u] cycles=%llu  (A=%uB, B=%uB)\n",
-                       rx, ry, (unsigned long long)g_cycles[cid],
-                       (unsigned)BYTES_A_STRIP, (unsigned)BYTES_B_STRIP);
+        /* ordered print to avoid interleaving */
+        for (uint32_t oy = 0; oy < ny; ++oy) {
+            for (uint32_t ox = 0; ox < nx; ++ox) {
+                flex_global_barrier_xy();
+                if (cx == ox && cy == oy) {
+                    printf("[Load][NONEXT] C[%u,%u] A.add=0x%08x B.add=0x%08x cycles=%u\n",
+                           cy, cx, add32_sum(addr_a, BYTES_A_STRIP), add32_sum(addr_b, BYTES_B_STRIP), (unsigned)(t1 - t0));
+                }
             }
-            flex_global_barrier_xy();
         }
     }
+    flex_global_barrier_xy();
 
-    if (cid == 0 && core == 0) printf("[Done][NONEXT]\n");
+    if (cid == 0 && core == 0) printf("Done (direct load test).\n");
     flex_eoc(0);
     return 0;
 }
