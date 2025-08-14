@@ -15,6 +15,9 @@ static inline uint64_t addsum_u32(const void *ptr, uint32_t n_bytes)
     return s;
 }
 
+static inline uint32_t hi32(uint64_t v) { return (uint32_t)(v >> 32); }
+static inline uint32_t lo32(uint64_t v) { return (uint32_t)(v & 0xFFFFFFFFu); }
+
 /* ---------- simple GEMM: 64x256 * 256x64 -> 64x64 (FP32) ---------- */
 static void matmul_64x256_256x64(const float *A, const float *B, float *C)
 {
@@ -120,8 +123,6 @@ int main(void)
     uint32_t a_off = 0u, b_off = 0u, c_off = 0u;
 
     if (IS_DM) {
-        /* Over-allocate + align if your allocator doesn’t guarantee 64B alignment.
-           If flex_l1_malloc is already DMA-safe aligned you may drop extra headroom. */
         const uint32_t ALIGN_DMA = 64u;
         void *raw_a = flex_l1_malloc(BYTES_A_STRIP + ALIGN_DMA);
         void *raw_b = flex_l1_malloc(BYTES_B_STRIP + ALIGN_DMA);
@@ -173,9 +174,9 @@ int main(void)
             bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
             bare_dma_wait_all();
             uint64_t sa = addsum_u32(addr_a, BYTES_A_STRIP);
-            printf("[Load][A] C[%u,0](DM) off=0x%08x bytes=%u | add=0x%016llx\n",
+            printf("[Load][A] C[%u,0](DM) off=0x%08x bytes=%u | add=0x%08x%08x\n",
                    (unsigned)ry, (unsigned)offA, (unsigned)BYTES_A_STRIP,
-                   (unsigned long long)sa);
+                   (unsigned)hi32(sa), (unsigned)lo32(sa));
         }
     }
     flex_global_barrier_xy();
@@ -193,9 +194,9 @@ int main(void)
                               size_per_row, dst_stride, src_stride, repeat);
             bare_dma_wait_all();
             uint64_t sb = addsum_u32(addr_b, BYTES_B_STRIP);
-            printf("[Load][B] C[0,%u](DM) base=0x%08x rows=%u | add=0x%016llx\n",
+            printf("[Load][B] C[0,%u](DM) base=0x%08x rows=%u | add=0x%08x%08x\n",
                    (unsigned)rx, (unsigned)offB_base, (unsigned)repeat,
-                   (unsigned long long)sb);
+                   (unsigned)hi32(sb), (unsigned)lo32(sb));
         }
     }
     flex_global_barrier_xy();
@@ -242,9 +243,10 @@ int main(void)
             if (IS_DM && P.y == ry && P.x == rx) {
                 uint64_t sa = addsum_u32((void*)(uintptr_t)local(a_off), BYTES_A_STRIP);
                 uint64_t sb = addsum_u32((void*)(uintptr_t)local(b_off), BYTES_B_STRIP);
-                printf("[Verify][AfterBcast] C[%u,%u]  A:add=0x%016llx  |  B:add=0x%016llx\n",
+                printf("[Verify][AfterBcast] C[%u,%u]  A:add=0x%08x%08x  |  B:add=0x%08x%08x\n",
                        (unsigned)ry, (unsigned)rx,
-                       (unsigned long long)sa, (unsigned long long)sb);
+                       (unsigned)hi32(sa), (unsigned)lo32(sa),
+                       (unsigned)hi32(sb), (unsigned)lo32(sb));
             }
         }
     }
@@ -266,8 +268,9 @@ int main(void)
                 matmul_64x256_256x64((const float*)A, (const float*)B, (float*)C);
 
                 uint64_t sc = addsum_u32(C, BYTES_C_TILE);
-                printf("[Compute] C[%u,%u] done. add=0x%016llx\n",
-                       (unsigned)ry, (unsigned)rx, (unsigned long long)sc);
+                printf("[Compute] C[%u,%u] done. add=0x%08x%08x\n",
+                       (unsigned)ry, (unsigned)rx,
+                       (unsigned)hi32(sc), (unsigned)lo32(sc));
 
                 const uint32_t offC     = hbm_off_C_tile(ry, rx);
                 const uint32_t size_row = (uint32_t)C_TILE_COLS * ELEM_BYTES; /* 64*4 */
