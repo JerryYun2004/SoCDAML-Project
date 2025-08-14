@@ -1,3 +1,12 @@
+#include "flex_runtime.h"
+#include "flex_printf.h"
+#include "fix_proj.h"
+#include "flex_alloc.h"
+#include "flex_dma_pattern.h"
+#include <stdint.h>
+
+
+
 /* -----------------------------------------------------------
  * Naive C = A(64x256) * B(256x64) on one core (fp32)
  * Layout:
