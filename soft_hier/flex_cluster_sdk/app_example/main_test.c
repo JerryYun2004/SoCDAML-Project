@@ -40,11 +40,14 @@ static void dma_write_row_to_hbm(uint32_t hbm_off_row, uint32_t row_off_l1, uint
 
 /* ---- Initialize A (sentinel per 64x64 tile) and B (mostly identity) in HBM, once on C[0,0] DM ----
  *
- * A: zero everywhere EXCEPT for tile (r,c) we set A[r*64+13][c*64+17] to a *unique* 32b float pattern.
- *     This guarantees each C tile XOR = that unique pattern (non-zero) when B is identity-like.
+ * A: zero everywhere EXCEPT tile (r,c) has A[r*64+13][c*64+17] = unique 32b float pattern.
+ *    Guarantees each C tile XOR is non-zero and tile-unique when B ≈ identity.
  *
- * B: diagonal = 1.0f, EXCEPT for the first column of each 64-col block (j = 0,64,128,192) we set B[j][j] = 2.0f
- *     so that each B-strip XOR is also non-zero (good for leader load checks). This does not affect our sentinels.
+ * B: diagonal = 1.0f, EXCEPT the first column of each 64-col block (j=0,64,128,192) is 2.0f
+ *    so each B-strip XOR is non-zero (helpful for leader-load checks) without affecting sentinels.
+ *
+ * IMPORTANT: this function is called **after** A/B/C L1 buffers are allocated on all clusters,
+ * so leader’s temporary row buffer allocation does not change a_off/b_off/c_off.
  */
 static void init_hbm_A_and_B_once(void)
 {
@@ -74,15 +77,13 @@ static void init_hbm_A_and_B_once(void)
         /* zero row */
         for (uint32_t c = 0; c < MAT_N; ++c) { p32[c] = 0u; }
 
-        /* If this row is the sentinel row of its 64-row tile, place 4 unique sentinels at columns c*64+17 */
         if ((r & 63u) == 13u) {
-            uint32_t tile_r = r >> 6; /* r / 64 --> 0..3 */
+            uint32_t tile_r = r >> 6; /* 0..3 */
             for (uint32_t tile_c = 0; tile_c < 4u; ++tile_c) {
-                uint32_t col = tile_c * 64u + 17u;
-                /* Unique, finite float bitpattern – vary by tile (r,c) and ensure row-strip XOR != 0 */
-                uint32_t bits = 0x3F800001u /* ~1.0000001f */
-                              ^ (1u << tile_c)   /* distinct per tile_c: 1,2,4,8 */
-                              ^ (tile_r << 8);   /* distinct per tile_r in higher bits */
+                uint32_t col  = tile_c * 64u + 17u;
+                uint32_t bits = 0x3F800001u           /* finite ~1.0000001f */
+                              ^ (1u << tile_c)        /* vary by tile_c    */
+                              ^ (tile_r << 8);        /* vary by tile_r    */
                 p32[col] = bits;
             }
         }
@@ -96,11 +97,10 @@ static void init_hbm_A_and_B_once(void)
         uint32_t *p32 = (uint32_t*)(uintptr_t)local(row_off);
         for (uint32_t c = 0; c < MAT_N; ++c) { p32[c] = 0u; }
 
-        /* diagonal element at (r,r) */
-        uint32_t j = r;  /* diagonal column equals row index */
-        uint32_t block_start = (j >> 6) << 6;  /* 0, 64, 128, 192 */
-        /* put 2.0f (0x40000000) at the first column of the block; else 1.0f (0x3f800000) */
-        p32[j] = (j == block_start) ? 0x40000000u : 0x3F800000u;
+        uint32_t j = r;                         /* diagonal */
+        uint32_t block_start = (j >> 6) << 6;   /* 0,64,128,192 */
+        p32[j] = (j == block_start) ? 0x40000000u /* 2.0f */
+                                    : 0x3F800000u;/* 1.0f */
 
         const uint32_t offB_row = HBM_B_BASE_OFFSET + r * ROW_BYTES;
         dma_write_row_to_hbm(offB_row, row_off, ROW_BYTES);
@@ -118,11 +118,11 @@ int main(void)
     flex_barrier_xy_init();
     flex_global_barrier_xy();
 
-    flex_alloc_init();  /* allocator prints */
+    flex_alloc_init();
 
     const uint32_t cid  = flex_get_cluster_id();
     const uint32_t core = flex_get_core_id();
-    const FlexPosition P = get_pos(cid);  /* P.x = col (0..3), P.y = row (0..3) */
+    const FlexPosition P = get_pos(cid);    /* P.x = col (0..3), P.y = row (0..3) */
     const uint32_t IS_DM = flex_is_dm_core(); /* DM core == last core per cluster */
 
     if (cid == 0u && core == 0u) {
@@ -137,12 +137,9 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* --- Initialize A and B in HBM once on C[0,0] DM --- */
-    init_hbm_A_and_B_once();
-    flex_global_barrier_xy();
-
     /* ===========================================================
-     * Allocate L1 on DM core only. Over-allocate and 64-align.
+     * 1) Allocate/align A/B/C in L1 on every cluster DM core
+     *    (BEFORE the one-time HBM initializer).
      * =========================================================== */
     void *addr_a_raw = (void*)0, *addr_b_raw = (void*)0, *addr_c_raw = (void*)0;
     void *addr_a     = (void*)0, *addr_b     = (void*)0, *addr_c     = (void*)0;
@@ -160,22 +157,19 @@ int main(void)
             flex_eoc(1); return 1;
         }
 
-        /* 64-align user pointers for DMA destinations/sources */
         addr_a = align_up_ptr(addr_a_raw, ALIGN_DMA);
         addr_b = align_up_ptr(addr_b_raw, ALIGN_DMA);
         addr_c = align_up_ptr(addr_c_raw, ALIGN_DMA);
 
-        /* TCDM offsets from aligned pointers (for collectives & DMA) */
         a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
         b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
         c_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_c);
 
-        /* Clear C tile */
         zero_f32(addr_c, BYTES_C_TILE);
     }
     flex_global_barrier_xy();
 
-    /* Ordered print of L1 offsets — DM cores only */
+    /* Offsets should now be IDENTICAL across all clusters */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
             flex_global_barrier_xy();
@@ -188,6 +182,12 @@ int main(void)
     }
     flex_global_barrier_xy();
 
+    /* ===========================================================
+     * 2) One-time HBM initialization (AFTER A/B/C L1 offsets fixed)
+     * =========================================================== */
+    init_hbm_A_and_B_once();
+    flex_global_barrier_xy();
+
     /* ==================== Load leaders (DM), ordered ==================== */
 
     /* Row leaders load A (contiguous 1D) */
@@ -197,7 +197,6 @@ int main(void)
             const uint32_t offA = hbm_off_A_strip(ry);
             bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
             bare_dma_wait_all();
-            /* Expect non-zero due to 4 distinct sentinels in this 64-row band */
             uint32_t ax = checksum_u32(addr_a, BYTES_A_STRIP);
             printf("[Load][A] C[%u,0](DM) off=0x%08x bytes=%u | xor=0x%08x add=0x%08x%08x\n",
                    (unsigned)ry, (unsigned)offA, (unsigned)BYTES_A_STRIP,
@@ -220,7 +219,6 @@ int main(void)
             bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
                               size_per_row, dst_stride, src_stride, repeat);
             bare_dma_wait_all();
-            /* Expect non-zero due to 2.0f at the first column of each 64-col block */
             uint32_t bx = checksum_u32(addr_b, BYTES_B_STRIP);
             printf("[Load][B] C[0,%u](DM) base=0x%08x rows=%u | xor=0x%08x add=0x%08x%08x\n",
                    (unsigned)rx, (unsigned)offB_base, (unsigned)repeat,
@@ -238,7 +236,7 @@ int main(void)
         flex_global_barrier_xy();
         if (IS_DM && P.x == 0u && P.y == ry) {
             const uint16_t row_m = mask_row(ry);
-            const uint16_t col_m = mask_all4();
+            const uint16_t col_m = mask_all_cols();
             flex_dma_async_broadcast(/*dst_off*/ a_off, /*src_off*/ a_off,
                                      BYTES_A_STRIP, row_m, col_m);
             flex_dma_async_wait_all();
@@ -279,7 +277,6 @@ int main(void)
 
     /* ==================== Compute & Store (DM), ordered ==================== */
     #if VERIFY_STORE_READBACK
-    /* scratch row buffer for optional readback verify */
     uint32_t rb_off = 0;
     if (IS_DM) {
         void *rb_raw = flex_l1_malloc((uint32_t)C_TILE_COLS * ELEM_BYTES + 64u);
@@ -300,7 +297,6 @@ int main(void)
 
                 uint32_t cx = checksum_u32(C, BYTES_C_TILE);
                 uint64_t cs = checksum_add_u32(C, BYTES_C_TILE);
-                /* With our A/B init, this XOR is guaranteed non-zero for all tiles */
                 printf("[Compute] C[%u,%u] done. xor=0x%08x add=0x%08x%08x\n",
                        (unsigned)ry,(unsigned)rx,
                        (unsigned)cx,(unsigned)(cs>>32),(unsigned)cs);
@@ -315,7 +311,6 @@ int main(void)
                 bare_dma_wait_all();
 
                 #if VERIFY_STORE_READBACK
-                /* Read back first row of this tile from HBM and print its XOR */
                 bare_dma_start_1d(/*dst*/ local(rb_off), /*src*/ hbm_addr(offC), size_row);
                 bare_dma_wait_all();
                 uint32_t rbx = checksum_u32((void*)(uintptr_t)local(rb_off), size_row);
