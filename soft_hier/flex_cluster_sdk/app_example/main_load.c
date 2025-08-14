@@ -4,7 +4,7 @@
  *   #define USE_BROADCAST 1  // leaders load A/B then broadcast to row/col
  *   #define USE_BROADCAST 0  // every cluster loads its own A/B directly
  *
- * No <stdio.h>/<stddef.h>. Uses SDK printf and barriers. Helpers defined once.
+ * No <stdio.h>/<stddef.h>. Uses SDK printf and barriers.
  */
 
 #define USE_BROADCAST 1
@@ -12,25 +12,10 @@
 #include <stdint.h>
 #include "flex_runtime.h"       /* cluster/core ids, barriers, get_pos(), local(), hbm_addr() */
 #include "flex_dma_pattern.h"   /* bare_dma_* and flex_dma_async_broadcast */
-#include "fixed_proj.h"         /* MAT_N, TILE, ELEM_BYTES, BYTES_A_STRIP, BYTES_B_STRIP */
+#include "fixed_proj.h"         /* MAT_N, TILE, ELEM_BYTES, BYTES_A_STRIP, BYTES_B_STRIP, masks & HBM offs */
 #include "soc_daml.h"           /* flex_alloc_init, flex_l1_malloc, tcdm_offset_from_ptr, flex_eoc */
 
-/* ---------- HBM layout (as in your working runs) ---------- */
-#ifndef HBM_A_BASE
-#define HBM_A_BASE    (0x00000400u)  /* A row-strip 0 starts here; +65536 per strip */
-#endif
-#ifndef HBM_B_BASE
-#define HBM_B_BASE    (0x00040400u)  /* B col 0 starts here; +0x100 per col */
-#endif
-
-static inline uint32_t hbm_off_A_strip(uint32_t r) {
-    return HBM_A_BASE + r * BYTES_A_STRIP;  /* 64*256*4 */
-}
-static inline uint32_t hbm_off_B_strip_base(uint32_t c) {
-    return HBM_B_BASE + (c * TILE) * ELEM_BYTES; /* column-block base */
-}
-
-/* -------------------- Helpers: defined ONCE -------------------- */
+/* -------------------- Local helpers (unique names) -------------------- */
 static inline uint32_t util_align_up_u32(uint32_t v, uint32_t a)
 { return (v + a - 1u) & ~(a - 1u); }
 
@@ -53,11 +38,6 @@ static inline uint32_t util_tcdm_off(void *p)
     return tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, p);
 }
 
-/* broadcast masks for 4x4 */
-static inline uint16_t mask_row4(uint32_t row) { return (uint16_t)(1u << row); }
-static inline uint16_t mask_col4(uint32_t col) { return (uint16_t)(1u << col); }
-static inline uint16_t mask_all4(void)        { return (uint16_t)0x000Fu; }
-
 /* ------------- one-cluster-at-a-time printing -------------- */
 static void print_offsets_ordered(uint32_t cx, uint32_t cy,
                                   uint32_t a_off, uint32_t b_off)
@@ -70,9 +50,9 @@ static void print_offsets_ordered(uint32_t cx, uint32_t cy,
                        (unsigned)cx, (unsigned)cy,
                        (unsigned)a_off, (unsigned)b_off);
             }
+            flex_global_barrier_xy();
         }
     }
-    flex_global_barrier_xy();
 }
 
 static void print_adds_ordered(uint32_t cx, uint32_t cy,
@@ -90,9 +70,9 @@ static void print_adds_ordered(uint32_t cx, uint32_t cy,
                        tagB, (unsigned)cx, (unsigned)cy,
                        (unsigned)(addB >> 32), (unsigned)(addB & 0xffffffffu));
             }
+            flex_global_barrier_xy();
         }
     }
-    flex_global_barrier_xy();
 }
 
 int main(void)
@@ -135,18 +115,17 @@ int main(void)
     uint32_t a_off = 0, b_off = 0;
 
     if (core == 0) {
-        addr_a = flex_l1_malloc(BYTES_A_STRIP + 64);
-        addr_b = flex_l1_malloc(BYTES_B_STRIP + 64);
+        addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);
+        addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
         if (!addr_a || !addr_b) {
             if (cid == 0) printf("[ERR] L1 malloc failed (A=%p, B=%p)\n", addr_a, addr_b);
             flex_eoc(1);
         }
         a_off = util_tcdm_off(addr_a);
         b_off = util_tcdm_off(addr_b);
-        a_off = util_align_up_u32(a_off, 64);
-        b_off = util_align_up_u32(b_off, 64);
+        a_off = util_align_up_u32(a_off, 64u);
+        b_off = util_align_up_u32(b_off, 64u);
 
-        /* Clear for determinism */
         util_zero_u32((void*)local(a_off), BYTES_A_STRIP);
         util_zero_u32((void*)local(b_off), BYTES_B_STRIP);
     }
@@ -156,14 +135,15 @@ int main(void)
     /* ---------------- Leaders load from HBM ---------------- */
     if (core == 0) {
         if (cx == 0u) {
-            const uint32_t h_off = hbm_off_A_strip(cy);
+            const uint32_t h_off = hbm_off_A_strip(cy);   /* from fixed_proj.h */
             bare_dma_start_1d(local(a_off), hbm_addr(h_off), BYTES_A_STRIP);
             bare_dma_wait_all();
+            /* small, post-DMA print */
             printf("[Load][A][BCAST] C[%u,0](DM) off=0x%08x bytes=%u\n",
                    (unsigned)cy, (unsigned)h_off, (unsigned)BYTES_A_STRIP);
         }
         if (cy == 0u) {
-            const uint32_t h_off = hbm_off_B_strip_base(cx);
+            const uint32_t h_off = hbm_off_B_strip_base(cx); /* from fixed_proj.h */
             const uint32_t size_per_row = TILE * ELEM_BYTES;   /* 64*4 */
             const uint32_t dst_stride   = size_per_row;
             const uint32_t src_stride   = MAT_N * ELEM_BYTES;  /* 256*4 */
@@ -179,10 +159,14 @@ int main(void)
     /* ---------------- Row/Col broadcast -------------------- */
     if (core == 0) {
         if (cx == 0u) {
-            flex_dma_async_broadcast(a_off, a_off, BYTES_A_STRIP, mask_row4(cy), mask_all4());
+            /* masks from fixed_proj.h: mask_row(row), mask_all4() */
+            flex_dma_async_broadcast(a_off, a_off, BYTES_A_STRIP,
+                                     mask_row(cy), mask_all4());
         }
         if (cy == 0u) {
-            flex_dma_async_broadcast(b_off, b_off, BYTES_B_STRIP, mask_all4(), mask_col4(cx));
+            /* masks from fixed_proj.h: mask_col(col) */
+            flex_dma_async_broadcast(b_off, b_off, BYTES_B_STRIP,
+                                     mask_all4(), mask_col(cx));
         }
         flex_dma_async_wait_all();
     }
