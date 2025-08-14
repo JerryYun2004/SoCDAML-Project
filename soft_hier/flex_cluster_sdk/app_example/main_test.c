@@ -1,6 +1,6 @@
 #include "flex_runtime.h"
 #include "flex_printf.h"
-#include "fix_proj.h"
+#include "fixed_proj.h"
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
 #include <stdint.h>
