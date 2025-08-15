@@ -139,7 +139,7 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
 
     /* Synchronize: all leaders must have finished HBM pulls */
     flex_global_barrier_xy();
@@ -164,10 +164,10 @@ int main(void)
     /* Wait for any broadcast(s) triggered by this cluster */
     flex_dma_async_wait_all();
 
-    if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
+    
     /* Final sync to ensure every cluster has both strips before ending */
    
-
+    flex_global_barrier_xy();
     flex_eoc(0);
     return 0;
 }
