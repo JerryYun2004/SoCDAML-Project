@@ -1,8 +1,13 @@
 /* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload)
- * Timing:
- *   - data_transfer_cycles: L1 alloc + HBM pull + broadcast + wait (no barriers)
- *   - synchronization_cycles: the two global barriers (between data phases)
- * Prints once from C[0,0] DM core using tiny printf (flex_printf.h).
+ *
+ * What it does:
+ *   1) One-time, silent HBM init on C[0,0]:
+ *        - A: ramp (idx+1)/65536
+ *        - B: identity with 2.0 on diagonal columns {0,64,128,192}, else 1.0 on diag
+ *   2) Row leaders C[y,0] load 64x256 A-strips; column leaders C[0,x] load 256x64 B-strips (2D).
+ *   3) Leaders broadcast their strips across the row/column.
+ *   4) No compute, no printf.
+ *   5) Only C[0,0] DM core emits flex_timer_start()/flex_timer_end() stamps.
  */
 
 #include <stdint.h>
@@ -10,7 +15,7 @@
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
 #include "fixed_proj.h"
-#include "flex_printf.h"   /* provides printf via tiny printf */
+#include "flex_printf.h"   /* no stdio; harmless to include even if unused */
 
 /* ---------- tiny helpers ---------- */
 static inline void *align64(void *p)
@@ -19,6 +24,7 @@ static inline void *align64(void *p)
     v = (v + 63u) & ~(uintptr_t)63u;
     return (void *)v;
 }
+
 static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint32_t row_bytes)
 {
     bare_dma_start_1d(/*dst*/ hbm_addr(hbm_off_row), /*src*/ local(l1_off_row), row_bytes);
@@ -87,15 +93,11 @@ int main(void)
         return 0;
     }
 
-    /* ------------- timing accumulators (32-bit cycles) ------------- */
-    uint32_t cycles_data = 0u;   /* L1 alloc + HBM pulls + broadcast + wait */
-    uint32_t cycles_sync = 0u;   /* the two barriers only */
-
-    
-    
+    /* convenience predicate: only C[0,0] DM emits timer stamps */
+    const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
 
     /* ======================== Data phase (part 1) ======================== */
-    flex_timer_start(); /* Emit a global stamp window (optional, for external timeline tools) */
+    if (is_timer_master) { flex_timer_start(); }  /* global stamp begin (alloc + HBM pulls) */
 
     /* -------- L1 allocations (DM core per cluster) -------- */
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
@@ -128,16 +130,15 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    flex_timer_end();
-    /* end data phase part 1 */
-    
+    if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
+
     /* ======================== Sync barrier #1 ======================== */
-    flex_timer_start();
+    if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();            /* wait until all leaders finished HBM pulls */
-    flex_timer_end();
-    
+    if (is_timer_master) { flex_timer_end(); }
+
     /* ======================== Data phase (part 2) ======================== */
-    flex_timer_start();
+    if (is_timer_master) { flex_timer_start(); }  /* broadcast + wait */
 
     /* Inter-cluster broadcasts (only leaders initiate) */
     if (P.x == 0u) {  /* A along row */
@@ -154,15 +155,14 @@ int main(void)
     }
 
     /* Wait for any broadcast(s) triggered by this cluster */
-    flex_dma_async_wait_all();  /* end data phase part 2 */
-    
-    flex_timer_end();
-    
-    /* ======================== Sync barrier #2 ======================== */
-    flex_timer_start();
-    flex_global_barrier_xy();            /* make sure everyone has both strips */
-    flex_timer_end(); /* Emit the global end stamp (optional) */
+    flex_dma_async_wait_all();
 
+    if (is_timer_master) { flex_timer_end(); }    /* end of data part 2 */
+
+    /* ======================== Sync barrier #2 ======================== */
+    if (is_timer_master) { flex_timer_start(); }
+    flex_global_barrier_xy();            /* make sure everyone has both strips */
+    if (is_timer_master) { flex_timer_end(); }    /* final stamp */
 
     flex_eoc(0);
     return 0;
