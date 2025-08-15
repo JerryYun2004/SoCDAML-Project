@@ -98,11 +98,11 @@ int main(void)
     uint32_t cycles_data = 0u;   /* L1 alloc + HBM pulls + broadcast + wait */
     uint32_t cycles_sync = 0u;   /* the two barriers only */
 
-    /* Emit a global stamp window (optional, for external timeline tools) */
-    flex_timer_start();
+    
+    
 
     /* ======================== Data phase (part 1) ======================== */
-    uint32_t t0 = rdcycle32();
+    flex_timer_start(); /* Emit a global stamp window (optional, for external timeline tools) */
 
     /* -------- L1 allocations (DM core per cluster) -------- */
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
@@ -135,15 +135,16 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    cycles_data += (rdcycle32() - t0);   /* end data phase part 1 */
-
+    flex_timer_end();
+    /* end data phase part 1 */
+    
     /* ======================== Sync barrier #1 ======================== */
-    t0 = rdcycle32();
+    flex_timer_start();
     flex_global_barrier_xy();            /* wait until all leaders finished HBM pulls */
-    cycles_sync += (rdcycle32() - t0);
-
+    flex_timer_end();
+    
     /* ======================== Data phase (part 2) ======================== */
-    t0 = rdcycle32();
+    flex_timer_start();
 
     /* Inter-cluster broadcasts (only leaders initiate) */
     if (P.x == 0u) {  /* A along row */
@@ -160,24 +161,15 @@ int main(void)
     }
 
     /* Wait for any broadcast(s) triggered by this cluster */
-    flex_dma_async_wait_all();
-
-    cycles_data += (rdcycle32() - t0);   /* end data phase part 2 */
-
-    /* ======================== Sync barrier #2 ======================== */
-    t0 = rdcycle32();
-    flex_global_barrier_xy();            /* make sure everyone has both strips */
-    cycles_sync += (rdcycle32() - t0);
-
-    /* Emit the global end stamp (optional) */
+    flex_dma_async_wait_all();  /* end data phase part 2 */
+    
     flex_timer_end();
+    
+    /* ======================== Sync barrier #2 ======================== */
+    flex_timer_start();
+    flex_global_barrier_xy();            /* make sure everyone has both strips */
+    flex_timer_end(); /* Emit the global end stamp (optional) */
 
-    /* ----------------------------- Final report ----------------------------- */
-    /* Print once from C[0,0] DM core (so logs aren’t interleaved) */
-    if (flex_get_cluster_id() == 0u && flex_is_dm_core()) {
-        printf("[Timing] data_transfer_cycles=%u\n", (unsigned)cycles_data);
-        printf("[Timing] synchronization_cycles=%u\n", (unsigned)cycles_sync);
-    }
 
     flex_eoc(0);
     return 0;
