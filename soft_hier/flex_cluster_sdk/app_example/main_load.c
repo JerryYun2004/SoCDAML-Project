@@ -1,14 +1,13 @@
 /* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload)
  *
- * What it does:
- *   1) One-time, silent HBM init on C[0,0]:
+ * Flow:
+ *   1) One-time, silent HBM init on C[0,0] DM:
  *        - A: ramp (idx+1)/65536
- *        - B: identity with 2.0 on diagonal columns {0,64,128,192}, else 1.0 on diag
- *   2) Row leaders C[y,0] load 64x256 A-strips; column leaders C[0,x] load 256x64 B-strips (2D).
- *   3) Leaders broadcast their strips across the row/column.
- *   4) No compute.
- *   5) Only C[0,0] DM core emits a single flex_timer_start()/flex_timer_end() window
- *      that spans alloc + HBM pulls + broadcasts (+ waits).
+ *        - B: identity with 2.0 on columns {0,64,128,192}, 1.0 otherwise on diag
+ *   2) Row leaders C[y,0] load 64x256 A-strips; column leaders C[0,x] load 256x64 B-strips.
+ *   3) Leaders broadcast their strips.
+ *   4) No compute, no normal prints.
+ *   5) Only C[0,0] DM emits flex_timer_start()/flex_timer_end().
  */
 
 #include <stdint.h>
@@ -16,7 +15,6 @@
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
 #include "fixed_proj.h"
-// #include "flex_printf.h"   /* optional; not used here */
 
 /* ---------- tiny helpers ---------- */
 static inline void *align64(void *p)
@@ -32,21 +30,22 @@ static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint
     bare_dma_wait_all();
 }
 
-/* ------------------- one-time HBM init (silent, identical to main_direct) ------------------- */
+/* ------------------- one-time HBM init (silent, identical to direct path) ------------------- */
 static void init_hbm_AB_silent(void)
 {
     const uint32_t IS_DM = flex_is_dm_core();
     const uint32_t cid   = flex_get_cluster_id();
     const FlexPosition P = get_pos(cid);
 
-    if (!(IS_DM && P.x == 0u && P.y == 0u)) return;  /* only C[0,0] DM core does this */
+    /* Only C[0,0] DM core populates HBM once */
+    if (!(IS_DM && P.x == 0u && P.y == 0u)) return;
 
     const uint32_t ROW_BYTES = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES; /* 256*4 = 1024 */
 
     void *row_raw = flex_l1_malloc(ROW_BYTES + 64u);
-    if (row_raw == (void*)0) { flex_eoc(1); return; }
+    if (row_raw == (void*)0) { /* nothing else we can do */ flex_eoc(1); return; }
 
-    void *row_aln   = align64(row_raw);
+    void *row_aln         = align64(row_raw);
     const uint32_t row_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, row_aln);
 
     /* A rows: ramp (idx+1)/65536 */
@@ -91,18 +90,23 @@ int main(void)
     const uint32_t IS_DM           = (core == 0u);
     const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
 
-    /* Offsets must be visible both to pull and broadcast code paths */
+    /* Offsets must stay in scope for pull and later broadcast */
     void *addr_a = 0, *addr_b = 0;
     uint32_t a_off = 0u, b_off = 0u;
 
-    /* ---------------- Timer start: only C[0,0] DM emits stamps ---------------- */
+    /* ----- Only C[0,0] DM emits timer stamps; everyone else still does the work ----- */
     if (is_timer_master) { flex_timer_start(); }
 
     /* -------- L1 allocations (DM core per cluster) -------- */
     if (IS_DM) {
         addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
         addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
-        if (addr_a == 0 || addr_b == 0) { flex_eoc(1); return 0; }
+        if (addr_a == 0 || addr_b == 0) { /* abort cleanly only from master to avoid half-exits */
+            if (is_timer_master) { flex_timer_end(); }
+            /* Single EOC to end sim deterministically */
+            if (is_timer_master) flex_eoc(1);
+            return 0;
+        }
 
         /* Compute 64B-aligned TCDM offsets for DMA & broadcast engines */
         a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
@@ -131,7 +135,7 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    /* Barrier between pulls and broadcasts (all cores) */
+    /* Barrier between pulls and broadcasts (all cores must reach) */
     flex_global_barrier_xy();
 
     /* -------- Inter-cluster broadcasts (leaders only) -------- */
@@ -156,10 +160,9 @@ int main(void)
     /* Final sync to ensure everyone has both strips before ending */
     flex_global_barrier_xy();
 
-    /* ---------------- Timer end: only C[0,0] DM emits stamps ---------------- */
-    if (is_timer_master) { flex_timer_end(); }
+    if (is_timer_master) { flex_timer_end(); }  /* close the timing window */
 
-    /* End program (no early EOC anywhere above!) */
-    flex_eoc(0);
+    /* Only the timer master ends the computation to avoid tearing down other cores mid-flight */
+    if (is_timer_master) { flex_eoc(0); }
     return 0;
 }
