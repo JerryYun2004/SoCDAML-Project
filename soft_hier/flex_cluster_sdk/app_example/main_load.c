@@ -24,13 +24,6 @@ static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint
     bare_dma_start_1d(/*dst*/ hbm_addr(hbm_off_row), /*src*/ local(l1_off_row), row_bytes);
     bare_dma_wait_all();
 }
-/* Read 32-bit cycle CSR (avoid cycleh) */
-static inline uint32_t rdcycle32(void)
-{
-    uint32_t v;
-    asm volatile("csrr %0, cycle" : "=r"(v));
-    return v;
-}
 
 /* ------------------- one-time HBM init (silent, identical to main_direct) ------------------- */
 static void init_hbm_AB_silent(void)
