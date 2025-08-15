@@ -179,6 +179,7 @@ int main(void)
      *    A horizontally by row; B vertically by column
      * =============================================================== */
 
+    if (is_timer_master) { flex_timer_start(); } 
     /* Broadcast A rows */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         flex_global_barrier_xy();
@@ -203,6 +204,7 @@ int main(void)
             flex_dma_async_wait_all();
         }
     }
+    if (is_timer_master) { flex_timer_end(); } 
     flex_global_barrier_xy();
 
 
