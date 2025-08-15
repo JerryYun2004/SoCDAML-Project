@@ -32,11 +32,9 @@ int main(void)
     /* Only let C[0,0] core 0 emit the timer stamps */
     const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u) & (core == 0u));
 
-    if (is_timer_master) {
-        flex_timer_start();          /* stamp BEGIN */
+    if (is_timer_master) {flex_timer_start(); }         /* stamp BEGIN */
         burn_cycles(200000u);        /* do a little work so elapsed time is non-zero */
-        flex_timer_end();            /* stamp END   */
-    }
+    if (is_timer_master) { flex_timer_end(); }           /* stamp END   */
 
     /* Everyone rendezvous, then exit */
     flex_global_barrier_xy();
