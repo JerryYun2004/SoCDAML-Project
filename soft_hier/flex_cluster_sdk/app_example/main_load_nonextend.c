@@ -43,6 +43,9 @@ static void init_hbm_AB_silent(void)
     const uint32_t cid   = flex_get_cluster_id();
     const FlexPosition P = get_pos(cid);
 
+     /* convenience predicate: only C[0,0] DM emits timer stamps */
+    const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
+    
     if (!(IS_DM && P.x == 0u && P.y == 0u)) return;
 
     const uint32_t ROW_BYTES = (uint32_t)MAT_N * ELEM_BYTES; /* 256*4 = 1024 */
@@ -95,6 +98,10 @@ int main(void)
     init_hbm_AB_silent();
     flex_global_barrier_xy();
 
+    /* convenience predicate: only C[0,0] DM emits timer stamps */
+    const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
+    
+    if (is_timer_master) { flex_timer_start(); } 
     /* -------- L1 alloc (DM core per cluster) -------- */
     void *addr_a = (void*)0, *addr_b = (void*)0;
     uint32_t a_off = 0u, b_off = 0u;
@@ -113,6 +120,7 @@ int main(void)
         zero_u32(addr_a, BYTES_A_STRIP);
         zero_u32(addr_b, BYTES_B_STRIP);
     }
+    if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
     flex_global_barrier_xy();
 
     /* -------- DIRECT LOADS (parallel DMA, no prints) -------- */
@@ -131,6 +139,7 @@ int main(void)
                           size_per_row, dst_stride, src_stride, (uint32_t)B_STRIP_ROWS);
         bare_dma_wait_all();
     }
+
     flex_global_barrier_xy();
 
     /* single end-of-compute to stop simulation */
