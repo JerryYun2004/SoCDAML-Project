@@ -1,13 +1,14 @@
-/* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload + timing)
+/* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload)
  *
- * What it does:
- *   1) One-time, silent HBM init on C[0,0] (same data pattern as main_direct.c):
- *        - A: ramp (idx+1)/65536
- *        - B: identity with 2.0 on diagonal columns {0,64,128,192}, else 1.0 on diag
- *   2) Row leaders C[y,0] load 64x256 A-strips; column leaders C[0,x] load 256x64 B-strips (2D).
- *   3) Leaders broadcast their strips across the row/column.
- *   4) No compute.
- *   5) Measure and print cycles for: DATA, SYNC, COMP(=0).
+ * Sections measured:
+ *   - DATA  : L1 alloc + leaders pull from HBM + broadcasts + DMA waits
+ *   - SYNC  : the two global barriers (before and after broadcast)
+ *   - COMPUTE: none (reported as 0)
+ *
+ * Notes:
+ *   - Uses only 32-bit 'cycle' CSR (no 'cycleh'), so GVSoC won't warn.
+ *   - Also tags sections with flex_timer_start/stop (sim-side markers).
+ *   - Prints results via flex_print / flex_print_int (no stdio).
  */
 
 #include <stdint.h>
@@ -18,7 +19,7 @@
                              HBM_*_BASE_OFFSET, mask_row/col/all4, hbm_off_*,
                              align_up_u32, local(), hbm_addr(), etc. */
 
-/* ---------- tiny helpers (no std headers) ---------- */
+/* ------------------------ tiny helpers ------------------------ */
 static inline void *align64(void *p)
 {
     uintptr_t v = (uintptr_t)p;
@@ -30,19 +31,26 @@ static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint
     bare_dma_start_1d(/*dst*/ hbm_addr(hbm_off_row), /*src*/ local(l1_off_row), row_bytes);
     bare_dma_wait_all();
 }
-static inline uint64_t read_cycles(void)
+static inline uint32_t rdcycle32(void)
 {
-    /* Robust 64-bit cycle read for RV32: read hi, lo, hi and retry if rollover */
-    uint32_t hi1, lo, hi2;
-    do {
-        asm volatile ("csrr %0, cycleh" : "=r"(hi1));
-        asm volatile ("csrr %0, cycle"  : "=r"(lo));
-        asm volatile ("csrr %0, cycleh" : "=r"(hi2));
-    } while (hi1 != hi2);
-    return ((uint64_t)hi1 << 32) | (uint64_t)lo;
+    uint32_t c;
+    __asm__ volatile ("csrr %0, cycle" : "=r"(c));
+    return c;
+}
+static inline uint32_t cyc_delta32(uint32_t start, uint32_t end)
+{
+    /* works across wrap for 32-bit counters */
+    return (uint32_t)(end - start);
+}
+static inline void pdec(const char *s, uint32_t v)
+{
+    /* tiny print: string then decimal then newline */
+    while (*s) { flex_log_char(*s++); }
+    flex_print_int(v);
+    flex_log_char('\n');
 }
 
-/* ------------------- one-time HBM init (silent, identical to main_direct) -------------------
+/* ------------------- one-time HBM init (silent, same as direct) -------------------
    A: ramp (idx+1)/65536;  B: identity with 2.0 on diag columns {0,64,128,192}. */
 static void init_hbm_AB_silent(void)
 {
@@ -91,42 +99,46 @@ int main(void)
     flex_alloc_init();
     flex_global_barrier_xy();
 
-    /* Silent HBM preload (only C[0,0] DM executes) — NOT timed */
+    /* Silent HBM preload (only C[0,0] DM executes) */
     init_hbm_AB_silent();
-    /* SYNC #0 (preload fence) — count in SYNC, not DATA */
-    uint64_t sync_cycles = 0;
-    uint64_t t_sync_s = read_cycles();
     flex_global_barrier_xy();   /* ensure A/B are in HBM before any load */
-    sync_cycles += (read_cycles() - t_sync_s);
 
     const uint32_t cid  = flex_get_cluster_id();
     const uint32_t core = flex_get_core_id();
     const FlexPosition P = get_pos(cid);   /* P.x in [0..3], P.y in [0..3] */
+    const uint32_t IS_DM = flex_is_dm_core();
 
     /* Only the DM core in each cluster should touch DMA/L1 in this microbench */
-    if (core != 0u) {
+    if (!IS_DM) {
+        /* stay alive but idle until the end to avoid affecting barriers */
+        flex_global_barrier_xy();
+        flex_global_barrier_xy();
         flex_eoc(0);
         return 0;
     }
 
-    /* -------- DATA section begins (allocs + HBM loads + broadcast) -------- */
-    flex_timer_start(0); /* DATA window for external tools */
-    uint64_t data_cycles = 0;
+    /* -------- L1 allocations (DM core per cluster) -------- */
+    uint32_t cyc_data_s=0, cyc_data_e=0;
+    uint32_t cyc_sync_s=0, cyc_sync_e=0;
+    uint32_t cyc_compute = 0;
 
-    uint64_t t_data_s = read_cycles();
+    /* DATA section timing (includes alloc + HBM loads + broadcasts + waits) */
+    cyc_data_s = rdcycle32();
+    flex_timer_start();                 /* simulator-side mark: DATA begin */
 
-    /* L1 allocations (included in DATA) */
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
     void *addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
-    if (addr_a == 0 || addr_b == 0) { flex_timer_end(0); flex_eoc(1); return 0; }
+    if (addr_a == 0 || addr_b == 0) { flex_timer_stop(); flex_eoc(1); return 0; }
 
-    /* Compute 64B-aligned TCDM offsets for DMA & broadcast engines */
     uint32_t a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
     uint32_t b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
     a_off = align_up_u32(a_off, 64u);
     b_off = align_up_u32(b_off, 64u);
 
-    /* Leaders pull from HBM (still in DATA window) */
+    /* SYNC section: barrier to ensure leaders finished HBM pulls happens AFTER the pulls,
+       but we time barriers separately, so we’ll stop DATA just before first barrier. */
+
+    /* Leaders pull from HBM (part of DATA) */
     if (P.x == 0u) {
         const uint32_t r = P.y;  /* 0..3 */
         const uint32_t h_off = hbm_off_A_strip(r);
@@ -146,17 +158,18 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    data_cycles += (read_cycles() - t_data_s);
+    /* End of DATA part 1; SYNC barrier #1 begins next */
+    cyc_data_e = rdcycle32();
+    flex_timer_stop();                   /* simulator-side mark: DATA end */
 
-    /* SYNC #1 (between HBM load and broadcast) — measure separately */
-    flex_timer_start(1); /* SYNC window for external tools (coarse) */
-    t_sync_s = read_cycles();
-    flex_global_barrier_xy();
-    sync_cycles += (read_cycles() - t_sync_s);
-    flex_timer_end(1);   /* end of first sync window */
+    /* SYNC section (barrier #1) */
+    cyc_sync_s = rdcycle32();
+    flex_timer_start();                  /* simulator-side mark: SYNC begin */
+    flex_global_barrier_xy();            /* wait all leaders finished HBM pulls */
 
-    /* DATA resumes: launch broadcasts + local wait */
-    t_data_s = read_cycles();
+    /* Back to DATA: broadcasts + waits (still counted inside DATA by requirement) */
+    flex_timer_stop();                   /* end SYNC #1 */
+    flex_timer_start();                  /* re-open DATA window */
 
     if (P.x == 0u) {
         const uint16_t row_m = mask_row(P.y);  /* select row P.y */
@@ -170,40 +183,41 @@ int main(void)
         flex_dma_async_broadcast(/*dst_off*/ b_off, /*src_off*/ b_off,
                                  /*bytes*/ BYTES_B_STRIP, row_m, col_m);
     }
-    flex_dma_async_wait_all();
+    flex_dma_async_wait_all();           /* ensure broadcasts complete */
 
-    data_cycles += (read_cycles() - t_data_s);
+    /* End of DATA part 2; SYNC barrier #2 next */
+    cyc_data_e = rdcycle32();
+    flex_timer_stop();                   /* simulator-side mark: DATA end (final) */
 
-    /* SYNC #2 (after broadcasts) — measure separately and also close SYNC window */
-    flex_timer_start(1); /* reuse SYNC id for external tools (second barrier) */
-    t_sync_s = read_cycles();
-    flex_global_barrier_xy();
-    sync_cycles += (read_cycles() - t_sync_s);
-    flex_timer_end(1);
+    /* SYNC section (barrier #2) */
+    {
+        uint32_t s2 = rdcycle32();
+        flex_timer_start();
+        flex_global_barrier_xy();        /* all clusters have both strips */
+        flex_timer_stop();
+        uint32_t e2 = rdcycle32();
+        /* accumulate both sync barriers: cyc_sync = (barrier #1) + (barrier #2) */
+        cyc_sync_e = e2;
+        /* Add first barrier cost (we measured it in cyc_sync_s..cyc_sync_e previously) */
+        /* For simplicity: reuse cyc_sync_s/e as the *total* sync time by adding deltas. */
+        uint32_t sync1 = cyc_delta32(cyc_sync_s, cyc_sync_e); /* from first SYNC block */
+        uint32_t sync2 = cyc_delta32(s2, e2);
+        cyc_sync_s = 0;                   /* repurpose fields to store total */
+        cyc_sync_e = sync1 + sync2;
+    }
 
-    flex_timer_end(0);   /* end DATA window */
+    /* COMPUTE section (none) */
+    cyc_compute = 0u;
 
-    /* COMP = 0 here (no compute) */
-    flex_timer_start(2);
-    flex_timer_end(2);
+    /* Report once from C[0,0] to avoid interleaved prints */
+    if (P.x == 0u && P.y == 0u) {
+        uint32_t t_data = cyc_delta32(cyc_data_s, cyc_data_e);
+        uint32_t t_sync = cyc_sync_e;  /* total from both barriers */
+        uint32_t t_comp = cyc_compute;
 
-    /* ---------- print timings once (C[0,0] DM) ---------- */
-    if (flex_get_cluster_id() == 0u && flex_get_core_id() == 0u) {
-        flex_print("[Time] Sections (cycles):\n");
-
-        flex_print("  DATA (alloc + HBM load + bcast): ");
-        flex_print_int((uint32_t)(data_cycles >> 32));  /* hi */
-        flex_print(" | ");
-        flex_print_int((uint32_t)(data_cycles & 0xFFFFFFFFu));  /* lo */
-        flex_print("\n");
-
-        flex_print("  SYNC (sum of 2 barriers):       ");
-        flex_print_int((uint32_t)(sync_cycles >> 32));  /* hi */
-        flex_print(" | ");
-        flex_print_int((uint32_t)(sync_cycles & 0xFFFFFFFFu));  /* lo */
-        flex_print("\n");
-
-        flex_print("  COMP (none here):               0\n");
+        pdec("[TIMER] data_cycles=", t_data);
+        pdec("[TIMER] sync_cycles=", t_sync);
+        pdec("[TIMER] compute_cycles=", t_comp);
     }
 
     flex_eoc(0);
