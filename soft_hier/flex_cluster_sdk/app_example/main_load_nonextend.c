@@ -34,6 +34,7 @@ static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint
 }
 
 /* ------------------- optional one-time HBM init (silent) -------------------
+   Preloading matrices A & B into HBM.
    If your DRAM model already preloads A/B, you can comment this out.
    A: ramp (idx+1)/65536, B: identity with 2.0 on diag columns {0,64,128,192}. */
 static void init_hbm_AB_silent(void)
