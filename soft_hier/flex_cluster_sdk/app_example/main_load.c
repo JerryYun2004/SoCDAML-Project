@@ -135,6 +135,8 @@ int main(void)
         bare_dma_wait_all();
     }
 
+    if (is_timer_master) { flex_timer_end(); }
+
     /* Barrier between pulls and broadcasts (all cores must reach) */
     flex_global_barrier_xy();
 
