@@ -1,6 +1,8 @@
-/* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload + timers)
- *
- * Behavior identical to your functional version; added timing + final print.
+/* main_load.c — Load-only microbenchmark (broadcast + fair HBM preload)
+ * Timing:
+ *   - data_transfer_cycles: L1 alloc + HBM pull + broadcast + wait (no barriers)
+ *   - synchronization_cycles: the two global barriers (between data phases)
+ * Prints once from C[0,0] DM core using tiny printf (flex_printf.h).
  */
 
 #include <stdint.h>
@@ -8,9 +10,9 @@
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
 #include "fixed_proj.h"
-#include "flex_printf.h"   /* provides flex_printf(...) */
+#include "flex_printf.h"   /* provides printf via tiny printf */
 
-/* --- tiny helpers (no std headers beyond stdint) --- */
+/* ---------- tiny helpers ---------- */
 static inline void *align64(void *p)
 {
     uintptr_t v = (uintptr_t)p;
@@ -22,17 +24,15 @@ static inline void dma_write_row(uint32_t hbm_off_row, uint32_t l1_off_row, uint
     bare_dma_start_1d(/*dst*/ hbm_addr(hbm_off_row), /*src*/ local(l1_off_row), row_bytes);
     bare_dma_wait_all();
 }
-
-/* 32-bit cycle read (avoids cycleh) */
+/* Read 32-bit cycle CSR (avoid cycleh) */
 static inline uint32_t rdcycle32(void)
 {
-    uint32_t r;
-    __asm__ __volatile__("csrr %0, cycle" : "=r"(r));
-    return r;
+    uint32_t v;
+    asm volatile("csrr %0, cycle" : "=r"(v));
+    return v;
 }
 
-/* ------------------- one-time HBM init (silent, identical to main_direct) -------------------
-   A: ramp (idx+1)/65536;  B: identity with 2.0 on diag columns {0,64,128,192}. */
+/* ------------------- one-time HBM init (silent, identical to main_direct) ------------------- */
 static void init_hbm_AB_silent(void)
 {
     const uint32_t IS_DM = flex_is_dm_core();
@@ -64,7 +64,6 @@ static void init_hbm_AB_silent(void)
     for (uint32_t r = 0; r < (uint32_t)MAT_N; ++r) {
         float *pf = (float*)(uintptr_t)local(row_off);
         for (uint32_t c = 0; c < (uint32_t)MAT_N; ++c) pf[c] = 0.0f;
-        /* set diagonal */
         if ((r % (uint32_t)C_TILE_COLS) == 0u) pf[r] = 2.0f;  /* 0,64,128,192 */
         else                                    pf[r] = 1.0f;
         const uint32_t offB_row = (uint32_t)HBM_B_BASE_OFFSET + r * ROW_BYTES;
@@ -95,15 +94,17 @@ int main(void)
         return 0;
     }
 
-    /* Timing accumulators (32-bit cycles; durations here are short enough) */
-    uint32_t cycles_data = 0u;
-    uint32_t cycles_sync = 0u;
+    /* ------------- timing accumulators (32-bit cycles) ------------- */
+    uint32_t cycles_data = 0u;   /* L1 alloc + HBM pulls + broadcast + wait */
+    uint32_t cycles_sync = 0u;   /* the two barriers only */
 
-    /* -------- L1 allocations (DM core per cluster) -------- */
-    /* DATA PART (1): allocations */
-    flex_timer_start();                  /* optional: emits a debug-mem timer tag */
+    /* Emit a global stamp window (optional, for external timeline tools) */
+    flex_timer_start();
+
+    /* ======================== Data phase (part 1) ======================== */
     uint32_t t0 = rdcycle32();
 
+    /* -------- L1 allocations (DM core per cluster) -------- */
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
     void *addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
     if (addr_a == 0 || addr_b == 0) { flex_eoc(1); return 0; }
@@ -114,64 +115,46 @@ int main(void)
     a_off = align_up_u32(a_off, 64u);
     b_off = align_up_u32(b_off, 64u);
 
-    uint32_t t1 = rdcycle32();
-    flex_timer_end();                    /* optional: emits a debug-mem timer tag */
-    cycles_data += (t1 - t0);
-
     /* -------- Leaders pull from HBM -------- */
-    /* DATA PART (2): HBM pulls for A and/or B (leaders only), no barriers inside */
-    flex_timer_start();
-    t0 = rdcycle32();
-
-    /* A-strip: row leader (x==0) pulls its row’s 64x256 (1D contiguous). */
-    if (P.x == 0u) {
-        const uint32_t r = P.y;  /* 0..3 */
+    if (P.x == 0u) {  /* A-strip: 64x256 contiguous */
+        const uint32_t r = P.y;
         const uint32_t h_off = hbm_off_A_strip(r);
         bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(h_off), /*bytes*/ BYTES_A_STRIP);
         bare_dma_wait_all();
     }
-
-    /* B-strip: column leader (y==0) pulls its column’s 256x64 (2D strided). */
-    if (P.y == 0u) {
-        const uint32_t c = P.x;  /* 0..3 */
+    if (P.y == 0u) {  /* B-strip: 256x64 strided */
+        const uint32_t c = P.x;
         const uint32_t base         = hbm_off_B_strip_base(c);
         const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * (uint32_t)ELEM_BYTES; /* 64*4 */
-        const uint32_t dst_stride   = size_per_row;                                   /* packed */
-        const uint32_t src_stride   = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES;         /* 256*4  */
-        const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                          /* 256    */
+        const uint32_t dst_stride   = size_per_row;
+        const uint32_t src_stride   = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES;        /* 256*4 */
+        const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                         /* 256   */
         bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(base),
                           /*rowSize*/ size_per_row, /*dstStride*/ dst_stride,
                           /*srcStride*/ src_stride, /*rows*/ repeat);
         bare_dma_wait_all();
     }
 
-    t1 = rdcycle32();
-    flex_timer_end();
-    cycles_data += (t1 - t0);
+    cycles_data += (rdcycle32() - t0);   /* end data phase part 1 */
 
-    /* SYNC PART (1): barrier before broadcasts */
+    /* ======================== Sync barrier #1 ======================== */
     t0 = rdcycle32();
-    flex_global_barrier_xy();
-    t1 = rdcycle32();
-    cycles_sync += (t1 - t0);
+    flex_global_barrier_xy();            /* wait until all leaders finished HBM pulls */
+    cycles_sync += (rdcycle32() - t0);
 
-    /* -------- Inter-cluster broadcast (only leaders initiate) -------- */
-    /* DATA PART (3): async broadcasts themselves */
-    flex_timer_start();
+    /* ======================== Data phase (part 2) ======================== */
     t0 = rdcycle32();
 
-    /* Broadcast A along rows */
-    if (P.x == 0u) {
-        const uint16_t row_m = mask_row(P.y);  /* select row P.y */
-        const uint16_t col_m = mask_all4();    /* all columns     */
+    /* Inter-cluster broadcasts (only leaders initiate) */
+    if (P.x == 0u) {  /* A along row */
+        const uint16_t row_m = mask_row(P.y);
+        const uint16_t col_m = mask_all4();
         flex_dma_async_broadcast(/*dst_off*/ a_off, /*src_off*/ a_off,
                                  /*bytes*/ BYTES_A_STRIP, row_m, col_m);
     }
-
-    /* Broadcast B down columns */
-    if (P.y == 0u) {
-        const uint16_t row_m = mask_all4();    /* all rows       */
-        const uint16_t col_m = mask_col(P.x);  /* select col P.x */
+    if (P.y == 0u) {  /* B down column */
+        const uint16_t row_m = mask_all4();
+        const uint16_t col_m = mask_col(P.x);
         flex_dma_async_broadcast(/*dst_off*/ b_off, /*src_off*/ b_off,
                                  /*bytes*/ BYTES_B_STRIP, row_m, col_m);
     }
@@ -179,24 +162,21 @@ int main(void)
     /* Wait for any broadcast(s) triggered by this cluster */
     flex_dma_async_wait_all();
 
-    t1 = rdcycle32();
-    flex_timer_end();
-    cycles_data += (t1 - t0);
+    cycles_data += (rdcycle32() - t0);   /* end data phase part 2 */
 
-    /* SYNC PART (2): final barrier so everyone has both strips before exit */
+    /* ======================== Sync barrier #2 ======================== */
     t0 = rdcycle32();
-    flex_global_barrier_xy();
-    t1 = rdcycle32();
-    cycles_sync += (t1 - t0);
+    flex_global_barrier_xy();            /* make sure everyone has both strips */
+    cycles_sync += (rdcycle32() - t0);
 
-    /* ---- Print totals exactly once (C[0,0] core 0) right before exit ---- */
-    if (flex_is_dm_core()) {
-        const uint32_t cid0 = flex_get_cluster_id();
-        const FlexPosition P0 = get_pos(cid0);
-        if (P0.x == 0u && P0.y == 0u) {
-            flex_printf("[Timing] data_transfer_cycles=%u\n", (unsigned)cycles_data);
-            flex_printf("[Timing] synchronization_cycles=%u\n", (unsigned)cycles_sync);
-        }
+    /* Emit the global end stamp (optional) */
+    flex_timer_end();
+
+    /* ----------------------------- Final report ----------------------------- */
+    /* Print once from C[0,0] DM core (so logs aren’t interleaved) */
+    if (flex_get_cluster_id() == 0u && flex_is_dm_core()) {
+        printf("[Timing] data_transfer_cycles=%u\n", (unsigned)cycles_data);
+        printf("[Timing] synchronization_cycles=%u\n", (unsigned)cycles_sync);
     }
 
     flex_eoc(0);
