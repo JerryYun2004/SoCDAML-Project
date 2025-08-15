@@ -141,8 +141,8 @@ int main(void)
     /* ===============================================================
      * 3) Leaders load stripes from HBM (DM core only), ordered prints
      * =============================================================== */
-    
-  
+
+    if (is_timer_master) { flex_timer_start(); } 
     /* Row leaders (x==0) load A_r with 1D contiguous DMA */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         flex_global_barrier_xy();
@@ -170,6 +170,8 @@ int main(void)
             uint64_t sb = addsum_u32(addr_b, BYTES_B_STRIP);
         }
     }
+
+    if (is_timer_master) { flex_timer_end(); } 
     flex_global_barrier_xy();
 
     /* ===============================================================
