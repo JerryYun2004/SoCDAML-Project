@@ -133,12 +133,12 @@ int main(void)
     if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
 
     /* ======================== Sync barrier #1 ======================== */
-    if (is_timer_master) { flex_timer_start(); }
+    // if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();            /* wait until all leaders finished HBM pulls */
-    if (is_timer_master) { flex_timer_end(); }
+    // if (is_timer_master) { flex_timer_end(); }
 
     /* ======================== Data phase (part 2) ======================== */
-    if (is_timer_master) { flex_timer_start(); }  /* broadcast + wait */
+    // if (is_timer_master) { flex_timer_start(); }  /* broadcast + wait */
 
     /* Inter-cluster broadcasts (only leaders initiate) */
     if (P.x == 0u) {  /* A along row */
@@ -157,12 +157,12 @@ int main(void)
     /* Wait for any broadcast(s) triggered by this cluster */
     flex_dma_async_wait_all();
 
-    if (is_timer_master) { flex_timer_end(); }    /* end of data part 2 */
+   //  if (is_timer_master) { flex_timer_end(); }    /* end of data part 2 */
 
     /* ======================== Sync barrier #2 ======================== */
-    if (is_timer_master) { flex_timer_start(); }
+    // if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();            /* make sure everyone has both strips */
-    if (is_timer_master) { flex_timer_end(); }    /* final stamp */
+    // if (is_timer_master) { flex_timer_end(); }    /* final stamp */
 
     flex_eoc(0);
     return 0;
