@@ -128,7 +128,7 @@ int main(void)
 
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
     void *addr_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
-    if (addr_a == 0 || addr_b == 0) { flex_timer_stop(); flex_eoc(1); return 0; }
+    if (addr_a == 0 || addr_b == 0) { flex_timer_start(); flex_eoc(1); return 0; }
 
     uint32_t a_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_a);
     uint32_t b_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, addr_b);
