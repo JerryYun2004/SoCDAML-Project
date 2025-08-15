@@ -97,7 +97,7 @@ int main(void)
     const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
 
     /* ======================== Data phase (part 1) ======================== */
-    if (is_timer_master) { flex_timer_start(); }  /* global stamp begin (alloc + HBM pulls) */
+    if (is_timer_master) { flex_timer_start();   /* global stamp begin (alloc + HBM pulls) */
 
     /* -------- L1 allocations (DM core per cluster) -------- */
     void *addr_a = flex_l1_malloc(BYTES_A_STRIP + 64u);  /* +64 for 64B alignment margin */
@@ -130,7 +130,7 @@ int main(void)
         bare_dma_wait_all();
     }
 
-    if (is_timer_master) { flex_timer_end(); }    /* global stamp end (end of data part 1) */
+    flex_timer_end(); }    /* global stamp end (end of data part 1) */
 
     /* ======================== Sync barrier #1 ======================== */
     // if (is_timer_master) { flex_timer_start(); }
