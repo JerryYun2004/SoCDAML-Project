@@ -187,9 +187,9 @@ int main(void)
 
     /* ------------------ print once from C[0,0] DM ------------------ */
     if (P.x == 0u && P.y == 0u) {
-        flex_printf("[Timing] data_transfer_cycles=%u\n", (unsigned)cycles_data);
-        flex_printf("[Timing] synchronization_cycles=%u\n", (unsigned)cycles_sync);
-        flex_printf("[Timing] compute_cycles=%u\n", (unsigned)cycles_compute);
+        flex_print("[Timing] data_transfer_cycles=%u\n", (unsigned)cycles_data);
+        flex_print("[Timing] synchronization_cycles=%u\n", (unsigned)cycles_sync);
+        flex_print("[Timing] compute_cycles=%u\n", (unsigned)cycles_compute);
     }
 
     /* final sync not needed; print is from single node */
