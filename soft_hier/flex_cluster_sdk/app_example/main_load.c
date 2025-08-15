@@ -88,11 +88,11 @@ int main(void)
     const uint32_t core = flex_get_core_id();
     const FlexPosition P = get_pos(cid);   /* P.x in [0..3], P.y in [0..3] */
 
-    /* Only the DM core in each cluster should touch DMA/L1 in this microbench */
-    if (core != 0u) {
-        flex_eoc(0);
-        return 0;
-    }
+    // /* Only the DM core in each cluster should touch DMA/L1 in this microbench */
+    // if (core != 0u) {
+    //     flex_eoc(0);
+    //     return 0;
+    // }
 
     /* convenience predicate: only C[0,0] DM emits timer stamps */
     const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
