@@ -164,7 +164,7 @@ int main(void)
         info_offB = offB_base;
     }
 
-    if (is_timer_master) { flex_timer_start(); } 
+    if (is_timer_master) { flex_timer_end(); } 
     
     flex_global_barrier_xy();
 
