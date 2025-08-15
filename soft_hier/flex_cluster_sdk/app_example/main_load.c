@@ -4,8 +4,7 @@
  *   - data_transfer_cycles: L1 allocations + leader HBM loads + broadcasts
  *   - synchronization_cycles: the two global barriers (after loads, after broadcasts)
  *
- * Functionally identical to your original load-only path.
- * Printing uses flex_printf.h's snprintf + flex_print(char*).
+ * Functionally identical to your original load-only path (no compute).
  */
 
 #include <stdint.h>
@@ -15,9 +14,9 @@
 #include "fixed_proj.h"    /* MAT_N, ELEM_BYTES, C_TILE_COLS, BYTES_*,
                               HBM_*_BASE_OFFSET, mask_row/col/all4, hbm_off_*,
                               align_up_u32, local(), hbm_addr(), etc. */
-#include "flex_printf.h"   /* provides snprintf(...) without std headers */
+#include "flex_printf.h"   /* provides a minimal snprintf(...) and flex_print(char *) */
 
-/* --- tiny helpers (no std headers) --- */
+/* --- tiny helpers (no std headers beyond stdint) --- */
 static inline void *align64(void *p)
 {
     uintptr_t v = (uintptr_t)p;
@@ -43,11 +42,11 @@ static inline uint32_t cycdelta(uint32_t start, uint32_t end)
 }
 
 /* Minimal print helper using the provided snprintf + flex_print */
-static inline void print_u(const char *fmt, uint32_t v)
+static inline void print_u32(const char *fmt, uint32_t v)
 {
     char buf[96];
-    /* flex_printf.h provides snprintf(...) */
-    (void)snprintf(buf, (size_t)sizeof(buf), fmt, v);
+    /* flex_printf.h declares its own snprintf; pass a plain int length */
+    (void)snprintf(buf, (int)sizeof(buf), fmt, v);
     flex_print(buf);
 }
 
@@ -135,11 +134,6 @@ int main(void)
     a_off = align_up_u32(a_off, 64u);
     b_off = align_up_u32(b_off, 64u);
 
-    /* Optional clears (keep commented for pure load timing)
-       zero_f32((void*)local(a_off), BYTES_A_STRIP);
-       zero_f32((void*)local(b_off), BYTES_B_STRIP);
-    */
-
     /* -------- Leaders pull from HBM (still in data section) -------- */
     /* A-strip: row leader (x==0) pulls its row’s 64x256 (1D contiguous). */
     if (P.x == 0u) {
@@ -203,14 +197,10 @@ int main(void)
     t1 = rdcycle32();                          /* end sync #2   */
     cycles_sync += cycdelta(t0, t1);
 
-    /* -------- Print timing once (C[0,0], core 0 only) -------- */
-    if (flex_is_dm_core()) {
-        const uint32_t cid_here = flex_get_cluster_id();
-        const FlexPosition P2   = get_pos(cid_here);
-        if (P2.x == 0u && P2.y == 0u) {
-            print_u("[Timing] data_transfer_cycles=%u\n", cycles_data);
-            print_u("[Timing] synchronization_cycles=%u\n", cycles_sync);
-        }
+    /* -------- Print timing once (cluster 0,0 core 0 only) -------- */
+    if (core == 0u && P.x == 0u && P.y == 0u) {
+        print_u32("[Timing] data_transfer_cycles=%u\n",     cycles_data);
+        print_u32("[Timing] synchronization_cycles=%u\n",   cycles_sync);
     }
 
     flex_eoc(0);
