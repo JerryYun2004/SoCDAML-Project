@@ -217,7 +217,10 @@ int main(void)
         zero32(Ctile, C_TILE_BYTES);
     }
     if (is_timer_master) { flex_timer_end(); }
+
+    if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); }
 
     /* =================== Phase 2b: DATA-IN (timed) =================== */
     if (is_timer_master) { flex_timer_start(); }  /* DATA-IN start */
