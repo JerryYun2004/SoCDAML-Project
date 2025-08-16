@@ -6,16 +6,13 @@
  *   B_tile: 256 x 64   (col block)
  *   C_tile: 64 x 64
  *
- * Matches previous benchmarks’ matrices for fair comparison.
- * Timers:
- *   - DATA-IN  : per-cluster DMA loads from HBM (A strip + B strip)  [C00 only stamps]
- *   - SYNC(1)  : barrier after loads                                 [C00 only stamps]
- *   - COMPUTE  : matmul on the tile                                  [C00 only stamps]
- *   - SYNC(2)  : barrier after compute                               [C00 only stamps]
- *   - DATA-OUT : per-cluster DMA store to HBM                        [C00 only stamps]
- *   - SYNC(3)  : final barrier                                       [C00 only stamps]
- *
- * Note: Prints inside timed windows are commented out.
+ * Timers (C[0,0] only):
+ *   DATA-IN  : serialized HBM→L1 loads for ALL 16 tiles (measured via HBM token ring)
+ *   SYNC(1)  : barrier after loads
+ *   COMPUTE  : per-cluster matmul
+ *   SYNC(2)  : barrier after compute
+ *   DATA-OUT : L1→HBM stores (parallel)
+ *   SYNC(3)  : final barrier
  */
 
 #include <stdint.h>
@@ -25,7 +22,7 @@
 #include "flex_dma_pattern.h"
 #include "fixed_proj.h"
 
-/* ------------------- small helpers (no std headers) ------------------- */
+/* ------------------- small helpers ------------------- */
 static inline uint64_t addsum_u32(const void *ptr, uint32_t n_bytes)
 {
     const uint32_t *p = (const uint32_t *)ptr;
@@ -86,29 +83,41 @@ static void init_hbm_AB_fair_via_dma(void)
     const uint32_t row_off = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, row_aln);
 
     /* A: ramp (idx+1)/65536 */
-    for (uint32_t r = 0; r < MAT_N; ++r) {
+    for (uint32_t r = 0; r < (uint32_t)MAT_N; ++r) {
         float *pf = (float*)(uintptr_t)local(row_off);
-        for (uint32_t c = 0; c < MAT_N; ++c) {
-            uint32_t idx = r * MAT_N + c;
+        for (uint32_t c = 0; c < (uint32_t)MAT_N; ++c) {
+            uint32_t idx = r * (uint32_t)MAT_N + c;
             pf[c] = (float)(idx + 1u) * (1.0f / 65536.0f);
         }
-        const uint32_t offA_row = HBM_A_BASE_OFFSET + r * ROW_BYTES;
+        const uint32_t offA_row = (uint32_t)HBM_A_BASE_OFFSET + r * ROW_BYTES;
         dma_write_row(offA_row, row_off, ROW_BYTES);
     }
 
     /* B: identity with 2.0 on diag cols 0,64,128,192; else diag=1.0 */
-    for (uint32_t r = 0; r < MAT_N; ++r) {
+    for (uint32_t r = 0; r < (uint32_t)MAT_N; ++r) {
         float *pf = (float*)(uintptr_t)local(row_off);
-        for (uint32_t c = 0; c < MAT_N; ++c) pf[c] = 0.0f;
-        if (r < MAT_N) {
-            if ((r % C_TILE_COLS) == 0u) pf[r] = 2.0f;
-            else                          pf[r] = 1.0f;
-        }
-        const uint32_t offB_row = HBM_B_BASE_OFFSET + r * ROW_BYTES;
+        for (uint32_t c = 0; c < (uint32_t)MAT_N; ++c) pf[c] = 0.0f;
+        if ((r % (uint32_t)C_TILE_COLS) == 0u) pf[r] = 2.0f;
+        else                                    pf[r] = 1.0f;
+        const uint32_t offB_row = (uint32_t)HBM_B_BASE_OFFSET + r * ROW_BYTES;
         dma_write_row(offB_row, row_off, ROW_BYTES);
     }
 
     printf("[InitHBM] A: ramp; B: identity (2.0 on columns {0,64,128,192})\n");
+}
+
+/* ------------------- global token (HBM) for serialized DMA timing -------------------
+ * We place it just after the full C buffer in HBM to avoid overlap.
+ */
+#ifndef ELEM_BYTES
+#define ELEM_BYTES 4u
+#endif
+#define C_FULL_BYTES   ((uint32_t)MAT_N * (uint32_t)MAT_N * (uint32_t)ELEM_BYTES)
+#define TOKEN_OFFSET   ((uint32_t)HBM_C_BASE_OFFSET + (uint32_t)C_FULL_BYTES + 0x100u)
+
+static inline volatile uint32_t* hbm_token_ptr(void)
+{
+    return (volatile uint32_t*)(uintptr_t)hbm_addr((uint32_t)TOKEN_OFFSET);
 }
 
 /* =============================== MAIN =============================== */
@@ -126,17 +135,6 @@ int main(void)
     const FlexPosition P = get_pos(cid);
     const uint32_t IS_DM = flex_is_dm_core();
     const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u)); /* C[0,0] DM prints timers */
-
-    // if (cid == 0u && core == 0u) {
-    //     printf("[Info][NONEXT] 4x4 cluster GEMM (FP32), direct HBM loads, 256x256 x 256x256\n");
-    //     printf("       Grid=(%u x %u), cores/cluster=%u\n",
-    //            (unsigned)ARCH_NUM_CLUSTER_X, (unsigned)ARCH_NUM_CLUSTER_Y,
-    //            (unsigned)ARCH_NUM_CORE_PER_CLUSTER);
-    //     printf("       Tile: A 64x256, B 256x64, C 64x64  (per cluster)\n");
-    //     printf("       Bytes: A-strip=%u, B-strip=%u, C-tile=%u\n",
-    //            (unsigned)BYTES_A_STRIP, (unsigned)BYTES_B_STRIP, (unsigned)BYTES_C_TILE);
-    // }
-    // flex_global_barrier_xy();
 
     /* -------- L1 alloc (DM core per cluster) -------- */
     void *addr_a = (void*)0, *addr_b = (void*)0, *addr_c = (void*)0;
@@ -165,79 +163,58 @@ int main(void)
     if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
     if (is_timer_master) { flex_timer_end(); }
-    // /* Ordered print of L1 offsets so no interleaving */
-    // for (uint32_t ry = 0; ry < 4u; ++ry) {
-    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
-    //         flex_global_barrier_xy();
-    //         if (IS_DM && P.y == ry && P.x == rx) {
-    //             printf("[C%u,%u] L1 offsets (aligned): A=%u B=%u C=%u\n",
-    //                    (unsigned)P.y, (unsigned)P.x,
-    //                    (unsigned)a_off, (unsigned)b_off, (unsigned)c_off);
-    //         }
-    //     }
-    // }
-    // flex_global_barrier_xy();
 
     /* one-time HBM init by C[0,0] — NOT TIMED */
     init_hbm_AB_fair_via_dma();
     flex_global_barrier_xy();
 
-   /* ---------- DATA-IN: serialize HBM reads across all 16 clusters ---------- */
-    
-    if (is_timer_master) { flex_timer_start(); }
-    
-    /* Row-major sweep: (ry, rx) = (0..3, 0..3) */
-    for (uint32_t ry = 0; ry < 4u; ++ry) {
-        for (uint32_t rx = 0; rx < 4u; ++rx) {
-    
-            /* Everyone arrives; only DM of C[ry,rx] performs the reads */
-            flex_global_barrier_xy();
-    
-            if (IS_DM && P.y == ry && P.x == rx) {
-                /* A: contiguous 1D strip for this row */
-                const uint32_t offA = hbm_off_A_strip(ry);
+    /* ====================== DATA-IN (serialized over all 16 tiles) ======================
+     * Implemented via a global HBM token; C00 measures the whole sweep (0..16).
+     */
+    volatile uint32_t * const token = hbm_token_ptr();
+
+    /* Initialize token and synchronize before starting the sweep */
+    if (is_timer_master) { *token = 0u; }
+    flex_global_barrier_xy();   /* make sure everyone sees token=0 */
+
+    const uint32_t my_tile = (uint32_t)(P.y * 4u + P.x);  /* 0..15 for 4x4 grid */
+
+    if (is_timer_master) { flex_timer_start(); }  /* DATA-IN (collective) start */
+
+    for (uint32_t t = 0; t < 16u; ++t) {
+        /* All DM cores spin until it's time for tile t (C00 spins too, so its timer accrues). */
+        if (IS_DM) {
+            while (*token != t) { /* busy-wait: keep the core active */ }
+            if (my_tile == t) {
+                /* ---- This tile's DM core pulls its A strip and B strip ---- */
+
+                /* A: contiguous 1D strip for row = P.y */
+                const uint32_t offA = hbm_off_A_strip(P.y);
                 bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
                 bare_dma_wait_all();
-    
-                /* B: 2D gather for this column */
-                const uint32_t offB_base    = hbm_off_B_strip_base(rx);
+
+                /* B: 2D gather for column = P.x */
+                const uint32_t offB_base    = hbm_off_B_strip_base(P.x);
                 const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * (uint32_t)ELEM_BYTES; /* 64*4 */
                 const uint32_t dst_stride   = size_per_row;
                 const uint32_t src_stride   = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES;        /* 256*4 */
                 const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                         /* 256   */
-    
+
                 bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
                                   size_per_row, dst_stride, src_stride, repeat);
                 bare_dma_wait_all();
+
+                /* Publish completion of tile t */
+                *token = t + 1u;
             }
-    
-            /* Everyone waits for that cluster to finish before the next one goes */
-            flex_global_barrier_xy();
         }
+        /* Non-DM cores do nothing here; they'll join at the next global barrier. */
     }
 
-    if (is_timer_master) { flex_timer_end(); }
+    if (is_timer_master) { flex_timer_end(); }    /* DATA-IN (collective) end */
 
-    if (is_timer_master) { flex_timer_start(); }
+    /* Ensure everyone observes token == 16 (end of loads) and rejoins */
     flex_global_barrier_xy();
-    if (is_timer_master) { flex_timer_end(); }
-
-    /* Ordered log sweep for the LOAD phase (outside timer window) */
-    // for (uint32_t ry = 0; ry < 4u; ++ry) {
-    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
-    //         flex_global_barrier_xy();
-            // if (IS_DM && P.y == ry && P.x == rx) {
-            //     printf("[LoadA][NONEXT] C[%u,%u] off=0x%08x bytes=%u | add=0x%08x%08x\n",
-            //            (unsigned)ry, (unsigned)rx,
-            //            (unsigned)info_offA, (unsigned)BYTES_A_STRIP,
-            //            (unsigned)a_hi, (unsigned)a_lo);
-            //     printf("[LoadB][NONEXT] C[%u,%u] base=0x%08x rows=%u | add=0x%08x%08x\n",
-            //            (unsigned)ry, (unsigned)rx,
-            //            (unsigned)info_offB, (unsigned)info_rows,
-            //            (unsigned)b_hi, (unsigned)b_lo);
-            // }
-    //     }
-    // }
 
     /* ====================== SYNC(1): after loads ====================== */
     if (is_timer_master) { flex_timer_start(); }
@@ -247,65 +224,41 @@ int main(void)
     /* ====================== COMPUTE (tile) ====================== */
     if (is_timer_master) { flex_timer_start(); }      /* COMPUTE start */
 
-    uint32_t c_hi = 0u, c_lo = 0u, offC = 0u;
     if (IS_DM) {
         float *A = (float*)(uintptr_t)local(a_off);
         float *B = (float*)(uintptr_t)local(b_off);
         float *C = (float*)(uintptr_t)local(c_off);
 
-        // printf("[Compute] C[%u,%u] tile\n", (unsigned)P.y, (unsigned)P.x);
+        /* matmul per tile */
         matmul_64x256_256x64((const float*)A, (const float*)B, (float*)C);
 
-        uint64_t sc = addsum_u32(C, BYTES_C_TILE);
-        c_hi = hi32(sc); c_lo = lo32(sc);
-        offC = hbm_off_C_tile(P.y, P.x);
+        /* (Optional) checksum if you want to keep it; outside of timers normally: */
+        // uint64_t sc = addsum_u32(C, BYTES_C_TILE);
+        // (void)sc;
     }
 
     if (is_timer_master) { flex_timer_end(); }        /* COMPUTE end */
-
-    // /* Ordered compute prints (outside timer window) */
-    // for (uint32_t ry = 0; ry < 4u; ++ry) {
-    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
-    //         flex_global_barrier_xy();
-    //         if (IS_DM && P.y == ry && P.x == rx) {
-    //             printf("[Compute][PAR][NONEXT] C[%u,%u] add=0x%08x%08x\n",
-    //                    (unsigned)ry, (unsigned)rx, (unsigned)c_hi, (unsigned)c_lo);
-    //         }
-    //     }
-    // }
 
     /* ====================== SYNC(2): after compute ====================== */
     if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
     if (is_timer_master) { flex_timer_end(); }
 
-    /* ====================== DATA-OUT (L1 -> HBM) ====================== */
+    /* ====================== DATA-OUT (L1 -> HBM, parallel) ====================== */
     if (is_timer_master) { flex_timer_start(); }      /* DATA-OUT start */
 
     if (IS_DM) {
+        const uint32_t offC     = hbm_off_C_tile(P.y, P.x);
         const uint32_t size_row = (uint32_t)C_TILE_COLS * ELEM_BYTES; /* 64*4 */
         const uint32_t dst_str  = (uint32_t)MAT_N * ELEM_BYTES;       /* 256*4 */
         const uint32_t src_str  = size_row;
-        const uint32_t reps     = (uint32_t)C_TILE_ROWS;              /* 64 */
-        // printf("[Store] C[%u,%u] -> HBM off 0x%08x\n", (unsigned)P.y, (unsigned)P.x, (unsigned)offC);
+        const uint32_t reps     = (uint32_t)C_TILE_ROWS;              /* 64    */
         bare_dma_start_2d(/*dst*/ hbm_addr(offC), /*src*/ local(c_off),
                           size_row, dst_str, src_str, reps);
         bare_dma_wait_all();
     }
 
     if (is_timer_master) { flex_timer_end(); }        /* DATA-OUT end */
-
-    // /* Ordered store prints (outside timer window) */
-    // for (uint32_t ry = 0; ry < 4u; ++ry) {
-    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
-    //         flex_global_barrier_xy();
-    //         if (IS_DM && P.y == ry && P.x == rx) {
-    //             printf("[Store][PAR][NONEXT]   C[%u,%u] -> HBM off=0x%08x, bytes/row=%u, reps=%u\n",
-    //                    (unsigned)ry, (unsigned)rx, (unsigned)offC,
-    //                    (unsigned)((uint32_t)C_TILE_COLS * ELEM_BYTES), (unsigned)C_TILE_ROWS);
-    //         }
-    //     }
-    // }
 
     /* ====================== SYNC(3): final ====================== */
     if (is_timer_master) { flex_timer_start(); }
