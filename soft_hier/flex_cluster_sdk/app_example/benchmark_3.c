@@ -1,9 +1,9 @@
-/* benchmark_2.c — 1x4 clusters, 2D GEMM with per-cluster B column tiles (no broadcast)
+/* benchmark_3.c — 1x4 clusters, 2D GEMM using inter-cluster broadcast (no per-cluster HBM reads)
  *
  * GEMM (FP32):
- *   A[M,K]        : 64 x 256   (shared; every worker cluster loads full A)
- *   B[K,N]        : 256 x 256  (full in HBM, split into 4 column-tiles of 64 each)
- *   C[M,N]        : 64 x 256   (each worker writes its N-tile: 64 columns)
+ *   A[M,K]        : 64 x 256   (loaded once on C(0,0), row-broadcast to C(0,1..3))
+ *   B[K,N]        : 256 x 256  (C(0,0) loads each N-tile of 64 cols, broadcasts to target column)
+ *   C[M,N]        : 64 x 256   (each worker writes its 64-col N-tile)
  *
  * Worker set: row y==0, columns x==0..3 (DM core only). Others idle but synchronized.
  *
@@ -13,16 +13,19 @@
  *   C[i,j]  at i*N + j
  *
  * DMA:
- *   - A:      single 1D transfer of A_BYTES.
- *   - B tile: 2D gather: rows=K, rowSize=TILE_N*4, srcStride=N*4, dstStride=rowSize.
- *   - C tile: 2D scatter: rows=M, rowSize=TILE_N*4, dstStride=N*4, srcStride=rowSize.
+ *   - Preload (C00 only, NOT timed): A (1D) + full B (1D) -> HBM.
+ *   - DATA-IN (timed, C00 only initiates):
+ *       * Read A (1D) into C00 L1, row-broadcast to row 0.
+ *       * For rx=0..3: read B-tile (2D) into C00 L1, broadcast to row 0, col rx.
+ *   - COMPUTE (timed): each worker computes its N-tile.
+ *   - DATA-OUT (timed): serialized 2D store of each C tile to HBM.
  */
 
 #include <stdint.h>
 #include "flex_runtime.h"
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
-#include "fixed_proj.h"     /* HBM_*_BASE_OFFSET, local(), hbm_addr(), barriers, etc. */
+#include "fixed_proj.h"     /* HBM_*_BASE_OFFSET, local(), hbm_addr(), masks, etc. */
 #include "flex_printf.h"
 
 /* ----------------- GEMM dims ----------------- */
@@ -33,7 +36,7 @@ enum {
     TILE_N  = 64u     /* per-cluster N-tile size (4 tiles across x=0..3) */
 };
 
-/* element size (fp32) — explicit for clarity */
+/* element size (fp32) — explicit */
 #ifndef ELEM_BYTES
 #define ELEM_BYTES 4u
 #endif
@@ -52,7 +55,7 @@ enum {
 #define C_TILE_ROWS   (M_DIM)                           /* 64 rows */
 #define C_TILE_BYTES  (C_TILE_ROWS * TILE_N * ELEM_BYTES)    /* 64*64*4  = 16 KB */
 
-/* ----------------- tiny helpers ----------------- */
+/* ----------------- helpers ----------------- */
 static inline void *align64(void *p)
 {
     uintptr_t v = (uintptr_t)p;
@@ -142,12 +145,12 @@ int main(void)
 
     /* Worker = DM cores in row y==0, columns x==0..3 */
     const uint32_t DO_WORK         = (uint32_t)(IS_DM && (P.y == 0u) && (P.x < 4u));
-    const uint32_t TILE_X          = P.x;                       /* which N-tile (0..3) */
-    const uint32_t N0              = (uint32_t)(TILE_X * TILE_N);   /* starting column index for this tile */
+    const uint32_t TILE_X          = P.x;                          /* which N-tile (0..3) */
+    const uint32_t N0              = (uint32_t)(TILE_X * TILE_N);  /* first column in this tile */
     const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
 
     if (cid == 0u && core == 0u) {
-        printf("[Info][Bmk2-2D] 1x4 (row 0), no broadcast; each pulls A + its B N-tile\n");
+        printf("[Info][Bmk3-2D] 1x4 (row 0), broadcast; C(0,0) pulls A & B-tiles, broadcasts to row\n");
         printf("       A=%ux%u bytes=%u\n", (unsigned)M_DIM, (unsigned)K_DIM, (unsigned)A_BYTES);
         printf("       B_full=%ux%u bytes=%u, tiles along N: 4 x (%u cols)\n",
                (unsigned)K_DIM, (unsigned)N_DIM, (unsigned)B_BYTES, (unsigned)TILE_N);
@@ -182,14 +185,13 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* =================== Phase 2: alloc L1 per worker =================== */
+    /* =================== Phase 2: all workers allocate L1 (same order/size → same offsets) =================== */
     void *raw_A = 0, *raw_Bt = 0, *raw_Ct = 0;
     void *aln_A = 0, *aln_Bt = 0, *aln_Ct = 0;
     uint32_t off_A = 0, off_Bt = 0, off_Ct = 0;
     float *A = 0, *Btile = 0, *Ctile = 0;
 
     if (DO_WORK) {
-        // printf("[C(0,%u) DM] Phase2: L1 alloc start\n", (unsigned)P.x);
         raw_A  = flex_l1_malloc(A_BYTES      + 64u);
         raw_Bt = flex_l1_malloc(B_TILE_BYTES + 64u);
         raw_Ct = flex_l1_malloc(C_TILE_BYTES + 64u);
@@ -215,51 +217,64 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* =================== Phase 2b: serialized HBM reads (DATA-IN, timed) =================== */
-    if (is_timer_master) { flex_timer_start(); }  /* DATA-IN window start */
+    /* =================== Phase 2b: DATA-IN via broadcast (timed) =================== */
+    if (is_timer_master) { flex_timer_start(); }  /* DATA-IN start */
 
-    /* checksums to print AFTER the timer window */
     uint64_t sa_local = 0, sb_local = 0;
 
+    /* --- A load (C00) + row broadcast to row 0 --- */
+    if (IS_DM && P.x == 0u && P.y == 0u) {
+        /* C00 needs its L1 too */
+        /* Pull A (1D) */
+        // printf("[HBM][Read ] A  <- 0x%08x (%u B)\n", (unsigned)HBM_A_BASE_OFFSET, (unsigned)A_BYTES);
+        dma_read_1d_from_hbm(off_A, (uint32_t)HBM_A_BASE_OFFSET, A_BYTES);
+
+        /* Broadcast A to all columns in row 0 */
+        const uint16_t row_m = mask_row(0u);
+        const uint16_t col_m = mask_all4();
+        flex_dma_async_broadcast(/*dst_off*/ off_A, /*src_off*/ off_A,
+                                 /*bytes*/ A_BYTES, row_m, col_m);
+        flex_dma_async_wait_all();
+    }
+
+    /* --- B tiles: for rx=0..3, C00 pulls tile and broadcasts to row 0, col rx --- */
     for (uint32_t rx = 0; rx < 4u; ++rx) {
-        flex_global_barrier_xy();
+        flex_global_barrier_xy();  /* keep others in step while C00 sequences tiles */
 
-        if (DO_WORK && (P.x == rx)) {
-            /* Pull A (contiguous 1D) */
-            // printf("[HBM][Read ] A  <- 0x%08x (%u B)\n", (unsigned)HBM_A_BASE_OFFSET, (unsigned)A_BYTES);
-            dma_read_1d_from_hbm(off_A, (uint32_t)HBM_A_BASE_OFFSET, A_BYTES);
-
-            /* Pull B N-tile via 2D gather:
-             *   rows      = B_TILE_ROWS = K_DIM (256)
-             *   rowSize   = TILE_N * 4
-             *   srcStride = N_DIM  * 4
-             *   dstStride = rowSize
-             *   srcBase   = HBM_B_BASE_OFFSET + (rx*TILE_N)*4
-             */
+        if (IS_DM && P.x == 0u && P.y == 0u) {
+            /* Read B N-tile into C00's Btile buffer */
             const uint32_t src_base = (uint32_t)HBM_B_BASE_OFFSET + (rx * TILE_N) * ELEM_BYTES;
             const uint32_t rowSize  = (uint32_t)(TILE_N * ELEM_BYTES);
             const uint32_t dstStr   = rowSize;
             const uint32_t srcStr   = (uint32_t)(N_DIM * ELEM_BYTES);
             const uint32_t rows     = (uint32_t)B_TILE_ROWS;
 
-            // printf("[HBM][Read ] Btile(N%u..%u) <- 0x%08x (rows=%u, rowSize=%u, srcStride=%u)\n",
-            //        (unsigned)N0, (unsigned)(N0 + TILE_N - 1u),
-            //        (unsigned)src_base, (unsigned)rows,
-            //        (unsigned)rowSize, (unsigned)srcStr);
+            // printf("[HBM][Read ] B-tile(rx=%u) <- 0x%08x (rows=%u, rowSize=%u, srcStride=%u)\n",
+            //        (unsigned)rx, (unsigned)src_base, (unsigned)rows, (unsigned)rowSize, (unsigned)srcStr);
 
             bare_dma_start_2d(/*dst*/ local(off_Bt), /*src*/ hbm_addr(src_base),
                               rowSize, dstStr, srcStr, rows);
             bare_dma_wait_all();
 
-            sa_local = addsum_u32(A,     A_BYTES);
-            sb_local = addsum_u32(Btile, B_TILE_BYTES);
-            /* (Do not print inside the timer window) */
+            /* Broadcast this tile only to (row 0, col rx) */
+            const uint16_t row_m = mask_row(0u);
+            const uint16_t col_m = mask_col((uint16_t)rx);
+            flex_dma_async_broadcast(/*dst_off*/ off_Bt, /*src_off*/ off_Bt,
+                                     /*bytes*/ B_TILE_BYTES, row_m, col_m);
+            flex_dma_async_wait_all();
         }
 
-        flex_global_barrier_xy();
+        flex_global_barrier_xy();  /* ensure recipient got its tile before next rx */
     }
 
-    if (is_timer_master) { flex_timer_end(); }    /* DATA-IN window end */
+    /* local checksums (computed by each worker) */
+    if (DO_WORK) {
+        sa_local = addsum_u32(A,     A_BYTES);
+        sb_local = addsum_u32(Btile, B_TILE_BYTES);
+        /* (do not print in timer window) */
+    }
+
+    if (is_timer_master) { flex_timer_end(); }    /* DATA-IN end */
 
     /* Ordered checksum prints (outside timer window) */
     for (uint32_t rx = 0; rx < 4u; ++rx) {
@@ -273,22 +288,22 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* =================== Sync barrier after reads (SYNC, timed) =================== */
+    /* =================== Sync after broadcast (timed) =================== */
     if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
     if (is_timer_master) { flex_timer_end(); }
 
-    /* =================== Phase 3: compute per-cluster N-tile (COMPUTE, timed) =================== */
+    /* =================== Phase 3: COMPUTE (timed) =================== */
     uint64_t sc_local = 0;
     if (is_timer_master) { flex_timer_start(); }
     if (DO_WORK) {
         compute_gemm_tile(A, Btile, Ctile);
         sc_local = addsum_u32(Ctile, C_TILE_BYTES);
-        /* (Do not print inside the timer window) */
+        /* (no print here) */
     }
     if (is_timer_master) { flex_timer_end(); }
 
-    /* Ordered print of compute checksum */
+    /* Ordered compute checksum prints */
     for (uint32_t rx = 0; rx < 4u; ++rx) {
         flex_global_barrier_xy();
         if (DO_WORK && (P.x == rx)) {
@@ -299,19 +314,19 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* =================== Sync barrier after compute (SYNC, timed) =================== */
+    /* =================== Sync after compute (timed) =================== */
     if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
     if (is_timer_master) { flex_timer_end(); }
 
-    /* =================== Phase 4: serialized HBM stores (DATA-OUT, timed) =================== */
-    if (is_timer_master) { flex_timer_start(); }  /* DATA-OUT window start */
+    /* =================== Phase 4: DATA-OUT (timed, serialized stores) =================== */
+    if (is_timer_master) { flex_timer_start(); }  /* DATA-OUT start */
 
     for (uint32_t rx = 0; rx < 4u; ++rx) {
         flex_global_barrier_xy();
 
         if (DO_WORK && (P.x == rx)) {
-            /* 2D scatter to full C buffer:
+            /* 2D scatter to full C:
              *   rows      = C_TILE_ROWS = M_DIM (64)
              *   rowSize   = TILE_N * 4
              *   dstStride = N_DIM  * 4
@@ -337,15 +352,15 @@ int main(void)
         flex_global_barrier_xy();
     }
 
-    if (is_timer_master) { flex_timer_end(); }    /* DATA-OUT window end */
+    if (is_timer_master) { flex_timer_end(); }    /* DATA-OUT end */
 
-    /* =================== Final sync (SYNC, timed) =================== */
+    /* =================== Final sync (timed) =================== */
     if (is_timer_master) { flex_timer_start(); }
     flex_global_barrier_xy();
     if (is_timer_master) { flex_timer_end(); }
 
     if (cid == 0u && core == 0u) {
-        printf("[Done][Bmk2-2D] All four C tiles stored to HBM base 0x%08x\n",
+        printf("[Done][Bmk3-2D] All four C tiles stored to HBM base 0x%08x\n",
                (unsigned)HBM_C_BASE_OFFSET);
     }
 
