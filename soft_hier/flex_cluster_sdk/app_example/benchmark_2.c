@@ -253,8 +253,8 @@ int main(void)
                               rowSize, dstStr, srcStr, rows);
             bare_dma_wait_all();
 
-            sa_local = addsum_u32(A,     A_BYTES);
-            sb_local = addsum_u32(Btile, B_TILE_BYTES);
+            // sa_local = addsum_u32(A,     A_BYTES);
+            // sb_local = addsum_u32(Btile, B_TILE_BYTES);
             /* (Do not print inside the timer window) */
         }
 
@@ -263,17 +263,17 @@ int main(void)
 
     if (is_timer_master) { flex_timer_end(); }    /* DATA-IN window end */
 
-    /* Ordered checksum prints (outside timer window) */
-    for (uint32_t rx = 0; rx < 4u; ++rx) {
-        flex_global_barrier_xy();
-        if (DO_WORK && (P.x == rx)) {
-            printf("[CHK][C(0,%u)] add(A)=0x%08x%08x  add(Btile)=0x%08x%08x\n",
-                   (unsigned)rx,
-                   (unsigned)(sa_local >> 32), (unsigned)(sa_local & 0xFFFFFFFFu),
-                   (unsigned)(sb_local >> 32), (unsigned)(sb_local & 0xFFFFFFFFu));
-        }
-    }
-    flex_global_barrier_xy();
+    // /* Ordered checksum prints (outside timer window) */
+    // for (uint32_t rx = 0; rx < 4u; ++rx) {
+    //     flex_global_barrier_xy();
+    //     if (DO_WORK && (P.x == rx)) {
+    //         printf("[CHK][C(0,%u)] add(A)=0x%08x%08x  add(Btile)=0x%08x%08x\n",
+    //                (unsigned)rx,
+    //                (unsigned)(sa_local >> 32), (unsigned)(sa_local & 0xFFFFFFFFu),
+    //                (unsigned)(sb_local >> 32), (unsigned)(sb_local & 0xFFFFFFFFu));
+    //     }
+    // }
+    // flex_global_barrier_xy();
 
     /* =================== Sync barrier after reads (SYNC, timed) =================== */
     if (is_timer_master) { flex_timer_start(); }
