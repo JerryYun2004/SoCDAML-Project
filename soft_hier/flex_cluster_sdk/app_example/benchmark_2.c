@@ -183,6 +183,7 @@ int main(void)
     flex_global_barrier_xy();
 
     /* =================== Phase 2: alloc L1 per worker =================== */
+    if (is_timer_master) { flex_timer_start(); }
     void *raw_A = 0, *raw_Bt = 0, *raw_Ct = 0;
     void *aln_A = 0, *aln_Bt = 0, *aln_Ct = 0;
     uint32_t off_A = 0, off_Bt = 0, off_Ct = 0;
@@ -213,6 +214,7 @@ int main(void)
 
         zero32(Ctile, C_TILE_BYTES);
     }
+    if (is_timer_master) { flex_timer_end(); }
     flex_global_barrier_xy();
 
     /* =================== Phase 2b: serialized HBM reads (DATA-IN, timed) =================== */
