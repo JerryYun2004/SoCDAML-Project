@@ -141,7 +141,7 @@ int main(void)
     /* -------- L1 alloc (DM core per cluster) -------- */
     void *addr_a = (void*)0, *addr_b = (void*)0, *addr_c = (void*)0;
     uint32_t a_off = 0u, b_off = 0u, c_off = 0u;
-
+    if (is_timer_master) { flex_timer_start(); }
     if (IS_DM) {
         void *raw_a = flex_l1_malloc(BYTES_A_STRIP + 64u);
         void *raw_b = flex_l1_malloc(BYTES_B_STRIP + 64u);
@@ -160,8 +160,11 @@ int main(void)
 
         zero_f32(addr_c, BYTES_C_TILE);
     }
-    flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); }
 
+    if (is_timer_master) { flex_timer_start(); }
+    flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); }
     // /* Ordered print of L1 offsets so no interleaving */
     // for (uint32_t ry = 0; ry < 4u; ++ry) {
     //     for (uint32_t rx = 0; rx < 4u; ++rx) {
