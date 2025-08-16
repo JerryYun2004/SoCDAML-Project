@@ -152,7 +152,7 @@ int main(void)
     const uint32_t C0      = (uint32_t)(TILE_X * C_TILE);   /* starting c-index for this tile */
 
     /* convenience predicate: only C[0,0] DM emits timer stamps */
-    const uint32_t is_timer_master = (uint32_t)((P.x == 0u) & (P.y == 0u));
+    const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) & (P.y == 0u));
   
     if (cid == 0u && core == 0u) {
         printf("[Info][Bmk2] 1x4 (row 0) clusters, no broadcast; each pulls A + its B c-tile\n");
