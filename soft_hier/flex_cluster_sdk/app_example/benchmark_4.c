@@ -144,7 +144,7 @@ int main(void)
      * Row-major sweep of all clusters; only the matching cluster's DM pulls data.
      * C[0,0] times the entire 16-tile sweep.
      */
-    if (is_timer_master) { flex_timer_start(); }
+    flex_timer_start();
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
 
@@ -173,7 +173,7 @@ int main(void)
             flex_global_barrier_xy();
         }
     }
-    if (is_timer_master) { flex_timer_end(); }
+    flex_timer_end();
 
     /* ---- SYNC after loads (timed) ---- */
     if (is_timer_master) { flex_timer_start(); }
