@@ -1,5 +1,5 @@
 /* benchmark_2.c — 1x4 clusters, 3D multiply with per-cluster B c-tiles (no broadcast)
- * Prints serialized per-cluster to avoid interleaving.
+ * Minimal fix: ordered print loops are OUTSIDE DO_WORK so all clusters hit the barriers.
  */
 
 #include <stdint.h>
@@ -132,7 +132,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* ---- Ordered print: announce Phase 2 per worker in x=0..3 ---- */
+    /* ---- Ordered print: announce Phase 2 per worker in x=0..3 (ALL clusters hit barrier) ---- */
     for (uint32_t rx = 0; rx < 4u; ++rx) {
         flex_global_barrier_xy();
         if (IS_DM && (P.y == 0u) && (P.x == rx)) {
@@ -147,6 +147,9 @@ int main(void)
     uint32_t off_A = 0, off_Bt = 0, off_Ct = 0;
     float *A = 0, *Btile = 0, *Ctile = 0;
     uint32_t work_ok = 1u;
+
+    /* per-worker checksums (for ordered prints later) */
+    uint64_t sa = 0, sb = 0, sc = 0;
 
     if (DO_WORK) {
         raw_A  = flex_l1_malloc(A_BYTES       + 64u);
@@ -176,27 +179,26 @@ int main(void)
 
             /* B c-tile via 2D */
             const uint32_t src_base  = (uint32_t)HBM_B_BASE_OFFSET + C0 * ELEM_BYTES;
-            const uint32_t rowSize   = (uint32_t)(C_TILE * ELEM_BYTES);   /* 16*4=64  */
-            const uint32_t dstStride = rowSize;                           /* 64       */
-            const uint32_t srcStride = (uint32_t)(C_DIM_C * ELEM_BYTES);  /* 64*4=256 */
-            const uint32_t rows      = (uint32_t)B_TILE_ROWS;             /* 1024     */
+            const uint32_t rowSize   = (uint32_t)(C_TILE * ELEM_BYTES);   /* 64  */
+            const uint32_t dstStride = rowSize;                           /* 64  */
+            const uint32_t srcStride = (uint32_t)(C_DIM_C * ELEM_BYTES);  /* 256 */
+            const uint32_t rows      = (uint32_t)B_TILE_ROWS;             /* 1024 */
             bare_dma_start_2d(/*dst*/ local(off_Bt), /*src*/ hbm_addr(src_base),
                               rowSize, dstStride, srcStride, rows);
             bare_dma_wait_all();
 
-            uint64_t sa = addsum_u32(A,     A_BYTES);
-            uint64_t sb = addsum_u32(Btile, B_TILE_BYTES);
-
-            /* ---- Ordered print: checksums per worker in x=0..3 ---- */
-            for (uint32_t rx = 0; rx < 4u; ++rx) {
-                flex_global_barrier_xy();
-                if (IS_DM && (P.y == 0u) && (P.x == rx)) {
-                    printf("[CHK][C(0,%u)] add(A)=0x%08x%08x  add(Btile)=0x%08x%08x\n",
-                           (unsigned)P.x,
-                           (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
-                           (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
-                }
-            }
+            sa = addsum_u32(A,     A_BYTES);
+            sb = addsum_u32(Btile, B_TILE_BYTES);
+        }
+    }
+    /* ---- Ordered prints for A/Btile checksums (ALL clusters in barrier) ---- */
+    for (uint32_t rx = 0; rx < 4u; ++rx) {
+        flex_global_barrier_xy();
+        if (IS_DM && (P.y == 0u) && (P.x == rx) && work_ok) {
+            printf("[CHK][C(0,%u)] add(A)=0x%08x%08x  add(Btile)=0x%08x%08x\n",
+                   (unsigned)P.x,
+                   (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
+                   (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
         }
     }
     flex_global_barrier_xy();
@@ -204,15 +206,14 @@ int main(void)
     /* Phase 3: compute per-cluster c-tile */
     if (DO_WORK && work_ok) {
         compute_3d_ctile(A, Btile, Ctile);
-        uint64_t sc = addsum_u32(Ctile, C_TILE_BYTES);
-
-        /* ---- Ordered print: Ct checksum per worker ---- */
-        for (uint32_t rx = 0; rx < 4u; ++rx) {
-            flex_global_barrier_xy();
-            if (IS_DM && (P.y == 0u) && (P.x == rx)) {
-                printf("[CHK][C(0,%u)] add(Ctile)=0x%08x%08x\n",
-                       (unsigned)P.x, (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
-            }
+        sc = addsum_u32(Ctile, C_TILE_BYTES);
+    }
+    /* ---- Ordered prints for Ctile checksum ---- */
+    for (uint32_t rx = 0; rx < 4u; ++rx) {
+        flex_global_barrier_xy();
+        if (IS_DM && (P.y == 0u) && (P.x == rx) && work_ok) {
+            printf("[CHK][C(0,%u)] add(Ctile)=0x%08x%08x\n",
+                   (unsigned)P.x, (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
         }
     }
     flex_global_barrier_xy();
