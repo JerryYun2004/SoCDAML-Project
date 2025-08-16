@@ -162,18 +162,18 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* Ordered print of L1 offsets so no interleaving */
-    for (uint32_t ry = 0; ry < 4u; ++ry) {
-        for (uint32_t rx = 0; rx < 4u; ++rx) {
-            flex_global_barrier_xy();
-            if (IS_DM && P.y == ry && P.x == rx) {
-                printf("[C%u,%u] L1 offsets (aligned): A=%u B=%u C=%u\n",
-                       (unsigned)P.y, (unsigned)P.x,
-                       (unsigned)a_off, (unsigned)b_off, (unsigned)c_off);
-            }
-        }
-    }
-    flex_global_barrier_xy();
+    // /* Ordered print of L1 offsets so no interleaving */
+    // for (uint32_t ry = 0; ry < 4u; ++ry) {
+    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
+    //         flex_global_barrier_xy();
+    //         if (IS_DM && P.y == ry && P.x == rx) {
+    //             printf("[C%u,%u] L1 offsets (aligned): A=%u B=%u C=%u\n",
+    //                    (unsigned)P.y, (unsigned)P.x,
+    //                    (unsigned)a_off, (unsigned)b_off, (unsigned)c_off);
+    //         }
+    //     }
+    // }
+    // flex_global_barrier_xy();
 
     /* one-time HBM init by C[0,0] — NOT TIMED */
     init_hbm_AB_fair_via_dma();
@@ -253,16 +253,16 @@ int main(void)
 
     if (is_timer_master) { flex_timer_end(); }        /* COMPUTE end */
 
-    /* Ordered compute prints (outside timer window) */
-    for (uint32_t ry = 0; ry < 4u; ++ry) {
-        for (uint32_t rx = 0; rx < 4u; ++rx) {
-            flex_global_barrier_xy();
-            if (IS_DM && P.y == ry && P.x == rx) {
-                printf("[Compute][PAR][NONEXT] C[%u,%u] add=0x%08x%08x\n",
-                       (unsigned)ry, (unsigned)rx, (unsigned)c_hi, (unsigned)c_lo);
-            }
-        }
-    }
+    // /* Ordered compute prints (outside timer window) */
+    // for (uint32_t ry = 0; ry < 4u; ++ry) {
+    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
+    //         flex_global_barrier_xy();
+    //         if (IS_DM && P.y == ry && P.x == rx) {
+    //             printf("[Compute][PAR][NONEXT] C[%u,%u] add=0x%08x%08x\n",
+    //                    (unsigned)ry, (unsigned)rx, (unsigned)c_hi, (unsigned)c_lo);
+    //         }
+    //     }
+    // }
 
     /* ====================== SYNC(2): after compute ====================== */
     if (is_timer_master) { flex_timer_start(); }
