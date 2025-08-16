@@ -179,43 +179,52 @@ int main(void)
     init_hbm_AB_fair_via_dma();
     flex_global_barrier_xy();
 
-    /* ====================== DATA-IN (HBM -> L1) ====================== */
-    if (is_timer_master) { flex_timer_start(); }      /* DATA-IN start */
-
-    uint32_t info_offA = 0u, info_offB = 0u;
-    uint32_t info_rows = (uint32_t)B_STRIP_ROWS;
-    uint32_t a_hi = 0u, a_lo = 0u, b_hi = 0u, b_lo = 0u;
-
-    if (IS_DM) {
-        /* A: contiguous strip for row P.y (1D) */
-        const uint32_t offA = hbm_off_A_strip(P.y);
-        // printf("[LoadA] C[%u,%u] <- HBM off 0x%08x (%u bytes)\n", (unsigned)P.y, (unsigned)P.x, (unsigned)offA, (unsigned)BYTES_A_STRIP);
-        bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
-        bare_dma_wait_all();
-        uint64_t sa = addsum_u32(addr_a, BYTES_A_STRIP);
-        a_hi = hi32(sa); a_lo = lo32(sa);
-        info_offA = offA;
-
-        /* B: gather 256 rows of 64 (2D) for column P.x */
-        const uint32_t offB_base    = hbm_off_B_strip_base(P.x);
-        const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * ELEM_BYTES; /* 64*4 */
-        const uint32_t dst_stride   = size_per_row;
-        const uint32_t src_stride   = (uint32_t)MAT_N * ELEM_BYTES;        /* 256*4 */
-        // printf("[LoadB] C[%u,%u] <- HBM base 0x%08x (rows=%u)\n", (unsigned)P.y, (unsigned)P.x, (unsigned)offB_base, (unsigned)info_rows);
-        bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
-                          size_per_row, dst_stride, src_stride, info_rows);
-        bare_dma_wait_all();
-        uint64_t sb = addsum_u32(addr_b, BYTES_B_STRIP);
-        b_hi = hi32(sb); b_lo = lo32(sb);
-        info_offB = offB_base;
-    }
-
-    if (is_timer_master) { flex_timer_end(); }        /* DATA-IN end */
-
-    /* Ordered log sweep for the LOAD phase (outside timer window) */
+   /* ---------- DATA-IN: serialize HBM reads across all 16 clusters ---------- */
+    /* Only C[0,0] DM emits the timer */
+    const uint32_t IS_DM = flex_is_dm_core();
+    const uint32_t cid   = flex_get_cluster_id();
+    const FlexPosition P = get_pos(cid);
+    const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
+    
+    if (is_timer_master) { flex_timer_start(); }
+    
+    /* Row-major sweep: (ry, rx) = (0..3, 0..3) */
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
+    
+            /* Everyone arrives; only DM of C[ry,rx] performs the reads */
             flex_global_barrier_xy();
+    
+            if (IS_DM && P.y == ry && P.x == rx) {
+                /* A: contiguous 1D strip for this row */
+                const uint32_t offA = hbm_off_A_strip(ry);
+                bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
+                bare_dma_wait_all();
+    
+                /* B: 2D gather for this column */
+                const uint32_t offB_base    = hbm_off_B_strip_base(rx);
+                const uint32_t size_per_row = (uint32_t)B_STRIP_COLS * (uint32_t)ELEM_BYTES; /* 64*4 */
+                const uint32_t dst_stride   = size_per_row;
+                const uint32_t src_stride   = (uint32_t)MAT_N * (uint32_t)ELEM_BYTES;        /* 256*4 */
+                const uint32_t repeat       = (uint32_t)B_STRIP_ROWS;                         /* 256   */
+    
+                bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
+                                  size_per_row, dst_stride, src_stride, repeat);
+                bare_dma_wait_all();
+            }
+    
+            /* Everyone waits for that cluster to finish before the next one goes */
+            flex_global_barrier_xy();
+        }
+    }
+
+    if (is_timer_master) { flex_timer_end(); }
+
+
+    /* Ordered log sweep for the LOAD phase (outside timer window) */
+    // for (uint32_t ry = 0; ry < 4u; ++ry) {
+    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
+    //         flex_global_barrier_xy();
             // if (IS_DM && P.y == ry && P.x == rx) {
             //     printf("[LoadA][NONEXT] C[%u,%u] off=0x%08x bytes=%u | add=0x%08x%08x\n",
             //            (unsigned)ry, (unsigned)rx,
@@ -226,8 +235,8 @@ int main(void)
             //            (unsigned)info_offB, (unsigned)info_rows,
             //            (unsigned)b_hi, (unsigned)b_lo);
             // }
-        }
-    }
+    //     }
+    // }
 
     /* ====================== SYNC(1): after loads ====================== */
     if (is_timer_master) { flex_timer_start(); }
