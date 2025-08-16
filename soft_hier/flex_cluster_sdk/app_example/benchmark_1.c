@@ -149,6 +149,7 @@ int main(void)
     float *A = 0, *B = 0, *C = 0;
 
     if (DO_WORK) {
+        flex_timer_start();
         raw_a = flex_l1_malloc(A_BYTES + 64u);
         raw_b = flex_l1_malloc(B_BYTES + 64u);
         raw_c = flex_l1_malloc(C_BYTES + 64u);
@@ -165,12 +166,13 @@ int main(void)
         off_b = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, aln_b);
         off_c = tcdm_offset_from_ptr((uint32_t)ARCH_CLUSTER_TCDM_BASE, aln_c);
 
-        printf("[L1] Offsets (C00 DM): A=%u B=%u C=%u\n", (unsigned)off_a, (unsigned)off_b, (unsigned)off_c);
-
         A = (float*)(uintptr_t)local(off_a);
         B = (float*)(uintptr_t)local(off_b);
         C = (float*)(uintptr_t)local(off_c);
+        flex_timer_end();
+        printf("[L1] Offsets (C00 DM): A=%u B=%u C=%u\n", (unsigned)off_a, (unsigned)off_b, (unsigned)off_c);
     }
+
     flex_global_barrier_xy();
 
     /* Initialize A,B in L1 and write to HBM (C00 DM) */
@@ -189,11 +191,12 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* Clear L1 A,B then read back from HBM (C00 DM) */
+    /* Clear L1 A,B and Read back from HBM */*/
     if (DO_WORK) {
         zero32(A, A_BYTES);
         zero32(B, B_BYTES);
 
+        flex_timer_start();
         const uint32_t H_OFF_A = (uint32_t)HBM_A_BASE_OFFSET;
         const uint32_t H_OFF_B = (uint32_t)HBM_B_BASE_OFFSET;
 
@@ -205,6 +208,7 @@ int main(void)
 
         uint64_t sa = addsum_u32(A, A_BYTES);
         uint64_t sb = addsum_u32(B, B_BYTES);
+        flex_timer_end();
         printf("[CHK] addsum(A)=0x%08x%08x  addsum(B)=0x%08x%08x\n",
                (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
                (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
@@ -213,9 +217,11 @@ int main(void)
 
     /* Compute C in L1 (C00 DM) */
     if (DO_WORK) {
+        flex_timer_start();
         zero32(C, C_BYTES);
         compute_3d(A, B, C);
         uint64_t sc = addsum_u32(C, C_BYTES);
+        flex_timer_end();
         printf("[CHK] addsum(C)=0x%08x%08x\n", (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
     }
     flex_global_barrier_xy();
