@@ -180,10 +180,6 @@ int main(void)
     flex_global_barrier_xy();
 
    /* ---------- DATA-IN: serialize HBM reads across all 16 clusters ---------- */
-    /* Only C[0,0] DM emits the timer */
-    const uint32_t IS_DM = flex_is_dm_core();
-    const uint32_t cid   = flex_get_cluster_id();
-    const FlexPosition P = get_pos(cid);
     
     if (is_timer_master) { flex_timer_start(); }
     
