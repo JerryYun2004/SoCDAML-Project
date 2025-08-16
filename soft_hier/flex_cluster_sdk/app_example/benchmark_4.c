@@ -150,8 +150,8 @@ int main(void)
             
             /* Everyone arrives; only C[ry,rx] DM performs the reads now */
             flex_global_barrier_xy();
-            flex_timer_start();
             if (IS_DM && P.y == ry && P.x == rx) {
+                flex_timer_start();
                 /* A: contiguous strip for this row (1D) */
                 const uint32_t offA = hbm_off_A_strip(ry);
                 bare_dma_start_1d(/*dst*/ local(a_off), /*src*/ hbm_addr(offA), BYTES_A_STRIP);
@@ -167,8 +167,9 @@ int main(void)
                 bare_dma_start_2d(/*dst*/ local(b_off), /*src*/ hbm_addr(offB_base),
                                   size_per_row, dst_stride, src_stride, repeat);
                 bare_dma_wait_all();
+                flex_timer_end();
             }
-            flex_timer_start();
+            
             /* Wait for the active cluster to finish before moving on */
             flex_global_barrier_xy();
         }
