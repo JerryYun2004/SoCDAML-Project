@@ -218,6 +218,9 @@ int main(void)
 
     if (is_timer_master) { flex_timer_end(); }
 
+    if (is_timer_master) { flex_timer_start(); }
+    flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); }
 
     /* Ordered log sweep for the LOAD phase (outside timer window) */
     // for (uint32_t ry = 0; ry < 4u; ++ry) {
