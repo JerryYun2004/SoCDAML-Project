@@ -139,13 +139,6 @@ int main(void)
     const uint32_t core = flex_get_core_id();
     const FlexPosition P = get_pos(cid);   /* P.x,P.y in [0..3] */
 
-    /* Only run on Cluster (0,0) DM core; everyone else exits. */
-    const uint32_t is_c00 = ((P.x == 0u) && (P.y == 0u)) ? 1u : 0u;
-    if (!is_c00 || core != 0u) {
-        flex_eoc(0);
-        return 0;
-    }
-
     /* Tell the user what we’re doing */
     printf("[Info][3D] Using 3D tensors (FP32)\n");
     printf("  A: %ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_A, (unsigned)A_DIM_B, (unsigned)T_DIM,   (unsigned)A_BYTES);
