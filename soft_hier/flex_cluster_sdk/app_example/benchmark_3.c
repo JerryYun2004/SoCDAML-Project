@@ -191,6 +191,7 @@ int main(void)
     uint32_t off_A = 0, off_Bt = 0, off_Ct = 0;
     float *A = 0, *Btile = 0, *Ctile = 0;
 
+    if (is_timer_master) { flex_timer_start(); }
     if (DO_WORK) {
         raw_A  = flex_l1_malloc(A_BYTES      + 64u);
         raw_Bt = flex_l1_malloc(B_TILE_BYTES + 64u);
@@ -215,6 +216,7 @@ int main(void)
 
         zero32(Ctile, C_TILE_BYTES);
     }
+    if (is_timer_master) { flex_timer_end(); }
     flex_global_barrier_xy();
 
     /* =================== Phase 2b: DATA-IN via broadcast (timed) =================== */
