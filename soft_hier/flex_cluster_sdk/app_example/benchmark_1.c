@@ -191,7 +191,7 @@ int main(void)
     }
     flex_global_barrier_xy();
 
-    /* Clear L1 A,B and Read back from HBM */*/
+    /* Clear L1 A,B and Read back from HBM */
     if (DO_WORK) {
         zero32(A, A_BYTES);
         zero32(B, B_BYTES);
