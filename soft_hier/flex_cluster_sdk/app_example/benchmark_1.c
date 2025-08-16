@@ -203,18 +203,18 @@ int main(void)
         const uint32_t H_OFF_A = (uint32_t)HBM_A_BASE_OFFSET;
         const uint32_t H_OFF_B = (uint32_t)HBM_B_BASE_OFFSET;
 
-        printf("[HBM][Read ] A <- 0x%08x (%u bytes)\n", (unsigned)H_OFF_A, (unsigned)A_BYTES);
+        // printf("[HBM][Read ] A <- 0x%08x (%u bytes)\n", (unsigned)H_OFF_A, (unsigned)A_BYTES);
         dma_read_1d_from_hbm(off_a, H_OFF_A, A_BYTES);
 
-        printf("[HBM][Read ] B <- 0x%08x (%u bytes)\n", (unsigned)H_OFF_B, (unsigned)B_BYTES);
+        // printf("[HBM][Read ] B <- 0x%08x (%u bytes)\n", (unsigned)H_OFF_B, (unsigned)B_BYTES);
         dma_read_1d_from_hbm(off_b, H_OFF_B, B_BYTES);
 
-        uint64_t sa = addsum_u32(A, A_BYTES);
-        uint64_t sb = addsum_u32(B, B_BYTES);
+        // uint64_t sa = addsum_u32(A, A_BYTES);
+        // uint64_t sb = addsum_u32(B, B_BYTES);
         flex_timer_end();
-        printf("[CHK] addsum(A)=0x%08x%08x  addsum(B)=0x%08x%08x\n",
-               (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
-               (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
+        // printf("[CHK] addsum(A)=0x%08x%08x  addsum(B)=0x%08x%08x\n",
+        //        (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
+        //        (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
     }
 
     if (DO_WORK) { flex_timer_start(); }
