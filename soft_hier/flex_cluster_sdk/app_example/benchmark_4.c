@@ -184,7 +184,6 @@ int main(void)
     const uint32_t IS_DM = flex_is_dm_core();
     const uint32_t cid   = flex_get_cluster_id();
     const FlexPosition P = get_pos(cid);
-    const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
     
     if (is_timer_master) { flex_timer_start(); }
     
