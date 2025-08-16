@@ -144,13 +144,13 @@ int main(void)
      * Row-major sweep of all clusters; only the matching cluster's DM pulls data.
      * C[0,0] times the entire 16-tile sweep.
      */
-    flex_timer_start();
+    
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
-
+            
             /* Everyone arrives; only C[ry,rx] DM performs the reads now */
             flex_global_barrier_xy();
-
+            flex_timer_start();
             if (IS_DM && P.y == ry && P.x == rx) {
                 /* A: contiguous strip for this row (1D) */
                 const uint32_t offA = hbm_off_A_strip(ry);
@@ -168,12 +168,11 @@ int main(void)
                                   size_per_row, dst_stride, src_stride, repeat);
                 bare_dma_wait_all();
             }
-
+            flex_timer_start();
             /* Wait for the active cluster to finish before moving on */
             flex_global_barrier_xy();
         }
     }
-    flex_timer_end();
 
     /* ---- SYNC after loads (timed) ---- */
     if (is_timer_master) { flex_timer_start(); }
