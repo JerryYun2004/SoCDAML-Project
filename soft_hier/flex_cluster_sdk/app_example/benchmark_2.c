@@ -1,9 +1,9 @@
 /* benchmark_2.c — 1x4 clusters, 2D GEMM with per-cluster B column tiles (no broadcast)
  *
  * GEMM (FP32):
- *   A[M,K]        : 256 x 64   (shared; every worker cluster loads full A)
- *   B[K,N]        :  64 x 256  (full in HBM, split into 4 column-tiles of 64 each)
- *   C[M,N]        : 256 x 256  (each worker writes its N-tile: 64 columns)
+ *   A[M,K]        : 64 x 256   (shared; every worker cluster loads full A)
+ *   B[K,N]        : 256 x 256  (full in HBM, split into 4 column-tiles of 64 each)
+ *   C[M,N]        : 64 x 256   (each worker writes its N-tile: 64 columns)
  *
  * Worker set: row y==0, columns x==0..3 (DM core only). Others idle but synchronized.
  *
@@ -14,8 +14,8 @@
  *
  * DMA:
  *   - A:      single 1D transfer of A_BYTES.
- *   - Btile:  2D gather: rows=K, rowSize=TILE_N*4, srcStride=N*4, dstStride=rowSize.
- *   - Ctile:  2D scatter: rows=M, rowSize=TILE_N*4, dstStride=N*4, srcStride=rowSize.
+ *   - B tile: 2D gather: rows=K, rowSize=TILE_N*4, srcStride=N*4, dstStride=rowSize.
+ *   - C tile: 2D scatter: rows=M, rowSize=TILE_N*4, dstStride=N*4, srcStride=rowSize.
  */
 
 #include <stdint.h>
@@ -27,10 +27,10 @@
 
 /* ----------------- GEMM dims ----------------- */
 enum {
-    M_DIM   = 256u,  /* rows of A, C */
-    K_DIM   = 64u,   /* cols of A / rows of B */
-    N_DIM   = 256u,  /* cols of B, C */
-    TILE_N  = 64u    /* per-cluster N-tile size (4 tiles across x=0..3) */
+    M_DIM   = 64u,    /* rows of A, C */
+    K_DIM   = 256u,   /* cols of A / rows of B */
+    N_DIM   = 256u,   /* cols of B, C */
+    TILE_N  = 64u     /* per-cluster N-tile size (4 tiles across x=0..3) */
 };
 
 /* element size (fp32) — explicit for clarity */
@@ -39,18 +39,18 @@ enum {
 #endif
 
 /* sizes (elements / bytes) */
-#define A_ELEMS   (M_DIM * K_DIM)          /* 256*64   = 16384  */
-#define B_ELEMS   (K_DIM * N_DIM)          /* 64*256   = 16384  */
-#define C_ELEMS   (M_DIM * N_DIM)          /* 256*256  = 65536  */
-#define A_BYTES   (A_ELEMS * ELEM_BYTES)   /* 65536 B  */
-#define B_BYTES   (B_ELEMS * ELEM_BYTES)   /* 65536 B  */
-#define C_BYTES   (C_ELEMS * ELEM_BYTES)   /* 262144 B */
+#define A_ELEMS   (M_DIM * K_DIM)          /* 64*256  = 16384  */
+#define B_ELEMS   (K_DIM * N_DIM)          /* 256*256 = 65536  */
+#define C_ELEMS   (M_DIM * N_DIM)          /* 64*256  = 16384  */
+#define A_BYTES   (A_ELEMS * ELEM_BYTES)   /*  64 KB  */
+#define B_BYTES   (B_ELEMS * ELEM_BYTES)   /* 256 KB  */
+#define C_BYTES   (C_ELEMS * ELEM_BYTES)   /*  64 KB  */
 
 /* 2D DMA geometry for tiles */
-#define B_TILE_ROWS   (K_DIM)                    /* 64 rows */
-#define B_TILE_BYTES  (B_TILE_ROWS * TILE_N * ELEM_BYTES)   /* 64*64*4 = 16 KB */
-#define C_TILE_ROWS   (M_DIM)                    /* 256 rows */
-#define C_TILE_BYTES  (C_TILE_ROWS * TILE_N * ELEM_BYTES)   /* 256*64*4 = 64 KB */
+#define B_TILE_ROWS   (K_DIM)                           /* 256 rows */
+#define B_TILE_BYTES  (B_TILE_ROWS * TILE_N * ELEM_BYTES)   /* 256*64*4 = 64 KB */
+#define C_TILE_ROWS   (M_DIM)                           /* 64 rows */
+#define C_TILE_BYTES  (C_TILE_ROWS * TILE_N * ELEM_BYTES)    /* 64*64*4  = 16 KB */
 
 /* ----------------- tiny helpers ----------------- */
 static inline void *align64(void *p)
@@ -147,7 +147,7 @@ int main(void)
     const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
 
     if (cid == 0u && core == 0u) {
-        printf("[Info][Bmk2-2D] 1x4 (row 0) clusters, no broadcast; each pulls A + its B N-tile\n");
+        printf("[Info][Bmk2-2D] 1x4 (row 0), no broadcast; each pulls A + its B N-tile\n");
         printf("       A=%ux%u bytes=%u\n", (unsigned)M_DIM, (unsigned)K_DIM, (unsigned)A_BYTES);
         printf("       B_full=%ux%u bytes=%u, tiles along N: 4 x (%u cols)\n",
                (unsigned)K_DIM, (unsigned)N_DIM, (unsigned)B_BYTES, (unsigned)TILE_N);
@@ -230,7 +230,7 @@ int main(void)
             dma_read_1d_from_hbm(off_A, (uint32_t)HBM_A_BASE_OFFSET, A_BYTES);
 
             /* Pull B N-tile via 2D gather:
-             *   rows      = B_TILE_ROWS = K_DIM
+             *   rows      = B_TILE_ROWS = K_DIM (256)
              *   rowSize   = TILE_N * 4
              *   srcStride = N_DIM  * 4
              *   dstStride = rowSize
@@ -312,7 +312,7 @@ int main(void)
 
         if (DO_WORK && (P.x == rx)) {
             /* 2D scatter to full C buffer:
-             *   rows      = C_TILE_ROWS = M_DIM
+             *   rows      = C_TILE_ROWS = M_DIM (64)
              *   rowSize   = TILE_N * 4
              *   dstStride = N_DIM  * 4
              *   srcStride = rowSize
