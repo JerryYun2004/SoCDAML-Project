@@ -140,7 +140,10 @@ int main(void)
         printf("       B=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_B, (unsigned)T_DIM,   (unsigned)C_DIM_C, (unsigned)B_BYTES);
         printf("       C=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_A, (unsigned)A_DIM_B, (unsigned)C_DIM_C, (unsigned)C_BYTES);
     }
+
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* L1 allocations (only C(0,0) DM) */
     void *raw_a = 0, *raw_b = 0, *raw_c = 0;
@@ -173,7 +176,9 @@ int main(void)
         printf("[L1] Offsets (C00 DM): A=%u B=%u C=%u\n", (unsigned)off_a, (unsigned)off_b, (unsigned)off_c);
     }
 
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* Initialize A,B in L1 and write to HBM (C00 DM) */
     if (DO_WORK) {
@@ -189,7 +194,10 @@ int main(void)
         printf("[HBM][Write] B -> 0x%08x (%u bytes)\n", (unsigned)H_OFF_B, (unsigned)B_BYTES);
         dma_write_1d_to_hbm(H_OFF_B, off_b, B_BYTES);
     }
+    
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* Clear L1 A,B and Read back from HBM */
     if (DO_WORK) {
@@ -213,7 +221,10 @@ int main(void)
                (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
                (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
     }
+    
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* Compute C in L1 (C00 DM) */
     if (DO_WORK) {
@@ -224,7 +235,10 @@ int main(void)
         flex_timer_end();
         printf("[CHK] addsum(C)=0x%08x%08x\n", (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
     }
+    
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* Store C to HBM (C00 DM) */
     if (DO_WORK) {
@@ -233,7 +247,10 @@ int main(void)
         dma_write_1d_to_hbm(H_OFF_C, off_c, C_BYTES);
         printf("[Done] 3D benchmark complete (C(0,0) DM).\n");
     }
+
+    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
+    if (DO_WORK) {flex_timer_end();}
 
     /* Everyone exits together */
     flex_eoc(0);
