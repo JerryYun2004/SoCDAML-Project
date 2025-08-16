@@ -127,16 +127,16 @@ int main(void)
     const uint32_t IS_DM = flex_is_dm_core();
     const uint32_t is_timer_master = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u)); /* C[0,0] DM prints timers */
 
-    if (cid == 0u && core == 0u) {
-        printf("[Info][NONEXT] 4x4 cluster GEMM (FP32), direct HBM loads, 256x256 x 256x256\n");
-        printf("       Grid=(%u x %u), cores/cluster=%u\n",
-               (unsigned)ARCH_NUM_CLUSTER_X, (unsigned)ARCH_NUM_CLUSTER_Y,
-               (unsigned)ARCH_NUM_CORE_PER_CLUSTER);
-        printf("       Tile: A 64x256, B 256x64, C 64x64  (per cluster)\n");
-        printf("       Bytes: A-strip=%u, B-strip=%u, C-tile=%u\n",
-               (unsigned)BYTES_A_STRIP, (unsigned)BYTES_B_STRIP, (unsigned)BYTES_C_TILE);
-    }
-    flex_global_barrier_xy();
+    // if (cid == 0u && core == 0u) {
+    //     printf("[Info][NONEXT] 4x4 cluster GEMM (FP32), direct HBM loads, 256x256 x 256x256\n");
+    //     printf("       Grid=(%u x %u), cores/cluster=%u\n",
+    //            (unsigned)ARCH_NUM_CLUSTER_X, (unsigned)ARCH_NUM_CLUSTER_Y,
+    //            (unsigned)ARCH_NUM_CORE_PER_CLUSTER);
+    //     printf("       Tile: A 64x256, B 256x64, C 64x64  (per cluster)\n");
+    //     printf("       Bytes: A-strip=%u, B-strip=%u, C-tile=%u\n",
+    //            (unsigned)BYTES_A_STRIP, (unsigned)BYTES_B_STRIP, (unsigned)BYTES_C_TILE);
+    // }
+    // flex_global_barrier_xy();
 
     /* -------- L1 alloc (DM core per cluster) -------- */
     void *addr_a = (void*)0, *addr_b = (void*)0, *addr_c = (void*)0;
@@ -216,16 +216,16 @@ int main(void)
     for (uint32_t ry = 0; ry < 4u; ++ry) {
         for (uint32_t rx = 0; rx < 4u; ++rx) {
             flex_global_barrier_xy();
-            if (IS_DM && P.y == ry && P.x == rx) {
-                printf("[LoadA][NONEXT] C[%u,%u] off=0x%08x bytes=%u | add=0x%08x%08x\n",
-                       (unsigned)ry, (unsigned)rx,
-                       (unsigned)info_offA, (unsigned)BYTES_A_STRIP,
-                       (unsigned)a_hi, (unsigned)a_lo);
-                printf("[LoadB][NONEXT] C[%u,%u] base=0x%08x rows=%u | add=0x%08x%08x\n",
-                       (unsigned)ry, (unsigned)rx,
-                       (unsigned)info_offB, (unsigned)info_rows,
-                       (unsigned)b_hi, (unsigned)b_lo);
-            }
+            // if (IS_DM && P.y == ry && P.x == rx) {
+            //     printf("[LoadA][NONEXT] C[%u,%u] off=0x%08x bytes=%u | add=0x%08x%08x\n",
+            //            (unsigned)ry, (unsigned)rx,
+            //            (unsigned)info_offA, (unsigned)BYTES_A_STRIP,
+            //            (unsigned)a_hi, (unsigned)a_lo);
+            //     printf("[LoadB][NONEXT] C[%u,%u] base=0x%08x rows=%u | add=0x%08x%08x\n",
+            //            (unsigned)ry, (unsigned)rx,
+            //            (unsigned)info_offB, (unsigned)info_rows,
+            //            (unsigned)b_hi, (unsigned)b_lo);
+            // }
         }
     }
 
@@ -285,17 +285,17 @@ int main(void)
 
     if (is_timer_master) { flex_timer_end(); }        /* DATA-OUT end */
 
-    /* Ordered store prints (outside timer window) */
-    for (uint32_t ry = 0; ry < 4u; ++ry) {
-        for (uint32_t rx = 0; rx < 4u; ++rx) {
-            flex_global_barrier_xy();
-            if (IS_DM && P.y == ry && P.x == rx) {
-                printf("[Store][PAR][NONEXT]   C[%u,%u] -> HBM off=0x%08x, bytes/row=%u, reps=%u\n",
-                       (unsigned)ry, (unsigned)rx, (unsigned)offC,
-                       (unsigned)((uint32_t)C_TILE_COLS * ELEM_BYTES), (unsigned)C_TILE_ROWS);
-            }
-        }
-    }
+    // /* Ordered store prints (outside timer window) */
+    // for (uint32_t ry = 0; ry < 4u; ++ry) {
+    //     for (uint32_t rx = 0; rx < 4u; ++rx) {
+    //         flex_global_barrier_xy();
+    //         if (IS_DM && P.y == ry && P.x == rx) {
+    //             printf("[Store][PAR][NONEXT]   C[%u,%u] -> HBM off=0x%08x, bytes/row=%u, reps=%u\n",
+    //                    (unsigned)ry, (unsigned)rx, (unsigned)offC,
+    //                    (unsigned)((uint32_t)C_TILE_COLS * ELEM_BYTES), (unsigned)C_TILE_ROWS);
+    //         }
+    //     }
+    // }
 
     /* ====================== SYNC(3): final ====================== */
     if (is_timer_master) { flex_timer_start(); }
