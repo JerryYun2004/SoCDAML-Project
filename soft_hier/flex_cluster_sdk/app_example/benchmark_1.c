@@ -1,11 +1,11 @@
-/* main_test.c — 3D microbenchmark; no early exit, only C(0,0) DM does work
+/* benchmark_1.c — 2D GEMM microbenchmark; no early exit, only C(0,0) DM does work
  *
  * Tensors (FP32):
- *   A[a,b,t] : 16 x 16 x 64
- *   B[b,t,c] : 16 x 64 x 16
- *   C[a,b,c] : 16 x 16 x 16,  C[a,b,c] = sum_t A[a,b,t] * B[b,t,c]
+ *   A[M,K] : 64  x 256   (row-major)
+ *   B[K,N] : 256 x 64    (row-major)
+ *   C[M,N] : 64  x 64,   C = A * B
  *
- * Phases:
+ * Phases (kept identical to your previous flow):
  *   - Bring-up + global barriers
  *   - L1 alloc (C(0,0) DM only) + report offsets
  *   - Initialize A,B in L1 -> write to HBM (C(0,0) DM only)
@@ -20,25 +20,25 @@
 #include "flex_alloc.h"
 #include "flex_dma_pattern.h"
 #include "fixed_proj.h"
-#include "flex_printf.h"  /* provides printf */
+#include "flex_printf.h"   /* provides printf */
 
+/* 2D GEMM dims */
 enum {
-    A_DIM_A = 16,
-    A_DIM_B = 16,
-    T_DIM   = 64,
-    C_DIM_C = 16
+    M_DIM = 64,     /* rows of A and C */
+    K_DIM = 256,    /* cols of A / rows of B */
+    N_DIM = 64      /* cols of B and C */
 };
 
 /* FP32 */
 #define ELEM_BYTES 4u
 
 /* elements / bytes */
-#define A_ELEMS   ((uint32_t)(A_DIM_A * A_DIM_B * T_DIM))
-#define B_ELEMS   ((uint32_t)(A_DIM_B * T_DIM   * C_DIM_C))
-#define C_ELEMS   ((uint32_t)(A_DIM_A * A_DIM_B * C_DIM_C))
-#define A_BYTES   (A_ELEMS * ELEM_BYTES)
-#define B_BYTES   (B_ELEMS * ELEM_BYTES)
-#define C_BYTES   (C_ELEMS * ELEM_BYTES)
+#define A_ELEMS  ((uint32_t)(M_DIM * K_DIM))   /* 64*256  */
+#define B_ELEMS  ((uint32_t)(K_DIM * N_DIM))   /* 256*64  */
+#define C_ELEMS  ((uint32_t)(M_DIM * N_DIM))   /* 64*64   */
+#define A_BYTES  (A_ELEMS * ELEM_BYTES)        /* 65536   */
+#define B_BYTES  (B_ELEMS * ELEM_BYTES)        /* 65536   */
+#define C_BYTES  (C_ELEMS * ELEM_BYTES)        /* 16384   */
 
 /* ----------------- helpers ----------------- */
 static inline void *align64(void *p)
@@ -76,43 +76,39 @@ static inline void dma_read_1d_from_hbm(uint32_t l1_off, uint32_t hbm_off, uint3
 }
 
 /* Fill test patterns (non-zero) */
-static void fill_A_pattern(float *A)
+static void fill_A_pattern(float *A)  /* A[M,K] row-major */
 {
-    /* A[a,b,t] = 1.0 + 0.001*a + 0.01*b + 0.0001*t */
-    for (uint32_t a = 0; a < (uint32_t)A_DIM_A; ++a)
-    for (uint32_t b = 0; b < (uint32_t)A_DIM_B; ++b)
-    for (uint32_t t = 0; t < (uint32_t)T_DIM;   ++t) {
-        const uint32_t ia = ((a * (uint32_t)A_DIM_B) + b) * (uint32_t)T_DIM + t;
-        A[ia] = 1.0f + 0.001f*(float)a + 0.01f*(float)b + 0.0001f*(float)t;
+    /* A[i,k] = 1.0 + 0.001*i + 0.0001*k */
+    for (uint32_t i = 0; i < (uint32_t)M_DIM; ++i)
+    for (uint32_t k = 0; k < (uint32_t)K_DIM; ++k) {
+        const uint32_t ia = i * (uint32_t)K_DIM + k;
+        A[ia] = 1.0f + 0.001f*(float)i + 0.0001f*(float)k;
     }
 }
 
-static void fill_B_pattern(float *B)
+static void fill_B_pattern(float *B)  /* B[K,N] row-major */
 {
-    /* B[b,t,c] = 0.5 + 0.02*b + 0.0002*t + 0.003*c */
-    for (uint32_t b = 0; b < (uint32_t)A_DIM_B; ++b)
-    for (uint32_t t = 0; t < (uint32_t)T_DIM;   ++t)
-    for (uint32_t c = 0; c < (uint32_t)C_DIM_C; ++c) {
-        const uint32_t ib = ((b * (uint32_t)T_DIM) + t) * (uint32_t)C_DIM_C + c;
-        B[ib] = 0.5f + 0.02f*(float)b + 0.0002f*(float)t + 0.003f*(float)c;
+    /* B[k,j] = 0.5 + 0.002*k + 0.01*j */
+    for (uint32_t k = 0; k < (uint32_t)K_DIM; ++k)
+    for (uint32_t j = 0; j < (uint32_t)N_DIM; ++j) {
+        const uint32_t ib = k * (uint32_t)N_DIM + j;
+        B[ib] = 0.5f + 0.002f*(float)k + 0.01f*(float)j;
     }
 }
 
-/* C[a,b,c] = sum_t A[a,b,t] * B[b,t,c] */
-static void compute_3d(const float *A, const float *B, float *C)
+/* C = A * B  where A[M,K], B[K,N], C[M,N] (all row-major) */
+static void compute_2d_gemm(const float *A, const float *B, float *C)
 {
-    for (uint32_t a = 0; a < (uint32_t)A_DIM_A; ++a) {
-        for (uint32_t b = 0; b < (uint32_t)A_DIM_B; ++b) {
-            for (uint32_t c = 0; c < (uint32_t)C_DIM_C; ++c) {
-                float acc = 0.0f;
-                for (uint32_t t = 0; t < (uint32_t)T_DIM; ++t) {
-                    const uint32_t ia = ((a * (uint32_t)A_DIM_B) + b) * (uint32_t)T_DIM + t;
-                    const uint32_t ib = ((b * (uint32_t)T_DIM) + t) * (uint32_t)C_DIM_C + c;
-                    acc += A[ia] * B[ib];
-                }
-                const uint32_t ic = ((a * (uint32_t)A_DIM_B) + b) * (uint32_t)C_DIM_C + c;
-                C[ic] = acc;
+    for (uint32_t i = 0; i < (uint32_t)M_DIM; ++i) {
+        float *c_row = &C[i * (uint32_t)N_DIM];
+        const float *a_row = &A[i * (uint32_t)K_DIM];
+        for (uint32_t j = 0; j < (uint32_t)N_DIM; ++j) {
+            float acc = 0.0f;
+            for (uint32_t k = 0; k < (uint32_t)K_DIM; ++k) {
+                /* a_row[k] * B[k, j] */
+                acc += a_row[k] * B[k * (uint32_t)N_DIM + j];
             }
+            c_row[j] = acc;
         }
     }
 }
@@ -135,12 +131,11 @@ int main(void)
     const uint32_t DO_WORK = (uint32_t)(IS_DM && (P.x == 0u) && (P.y == 0u));
 
     if (cid == 0u && core == 0u) {
-        printf("[Info][3D] Single-cluster (0,0) 3D test; others idle but synchronized\n");
-        printf("       A=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_A, (unsigned)A_DIM_B, (unsigned)T_DIM,   (unsigned)A_BYTES);
-        printf("       B=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_B, (unsigned)T_DIM,   (unsigned)C_DIM_C, (unsigned)B_BYTES);
-        printf("       C=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_A, (unsigned)A_DIM_B, (unsigned)C_DIM_C, (unsigned)C_BYTES);
+        printf("[Info][2D] Single-cluster (0,0) GEMM test; others idle but synchronized\n");
+        printf("       A=%ux%u  (%u bytes)\n", (unsigned)M_DIM, (unsigned)K_DIM, (unsigned)A_BYTES);
+        printf("       B=%ux%u  (%u bytes)\n", (unsigned)K_DIM, (unsigned)N_DIM, (unsigned)B_BYTES);
+        printf("       C=%ux%u  (%u bytes)\n", (unsigned)M_DIM, (unsigned)N_DIM, (unsigned)C_BYTES);
     }
-
     flex_global_barrier_xy();
 
     /* L1 allocations (only C(0,0) DM) */
@@ -150,7 +145,7 @@ int main(void)
     float *A = 0, *B = 0, *C = 0;
 
     if (DO_WORK) {
-        flex_timer_start();
+        flex_timer_start();  /* include L1 alloc under data movement */
         raw_a = flex_l1_malloc(A_BYTES + 64u);
         raw_b = flex_l1_malloc(B_BYTES + 64u);
         raw_c = flex_l1_malloc(C_BYTES + 64u);
@@ -171,12 +166,14 @@ int main(void)
         B = (float*)(uintptr_t)local(off_b);
         C = (float*)(uintptr_t)local(off_c);
         flex_timer_end();
-        printf("[L1] Offsets (C00 DM): A=%u B=%u C=%u\n", (unsigned)off_a, (unsigned)off_b, (unsigned)off_c);
+
+        printf("[L1] Offsets (C00 DM): A=%u B=%u C=%u\n",
+               (unsigned)off_a, (unsigned)off_b, (unsigned)off_c);
     }
 
-    if (DO_WORK) {flex_timer_start();}
+    if (DO_WORK) { flex_timer_start(); }
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
+    if (DO_WORK) { flex_timer_end(); }
 
     /* Initialize A,B in L1 and write to HBM (C00 DM) */
     if (DO_WORK) {
@@ -192,17 +189,17 @@ int main(void)
         printf("[HBM][Write] B -> 0x%08x (%u bytes)\n", (unsigned)H_OFF_B, (unsigned)B_BYTES);
         dma_write_1d_to_hbm(H_OFF_B, off_b, B_BYTES);
     }
-    
-    if (DO_WORK) {flex_timer_start();}
+
+    if (DO_WORK) { flex_timer_start(); }
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
+    if (DO_WORK) { flex_timer_end(); }
 
     /* Clear L1 A,B and Read back from HBM */
     if (DO_WORK) {
         zero32(A, A_BYTES);
         zero32(B, B_BYTES);
 
-        flex_timer_start();
+        flex_timer_start();  /* data movement timing window */
         const uint32_t H_OFF_A = (uint32_t)HBM_A_BASE_OFFSET;
         const uint32_t H_OFF_B = (uint32_t)HBM_B_BASE_OFFSET;
 
@@ -219,36 +216,37 @@ int main(void)
                (unsigned)(sa >> 32), (unsigned)(sa & 0xFFFFFFFFu),
                (unsigned)(sb >> 32), (unsigned)(sb & 0xFFFFFFFFu));
     }
-    
-    if (DO_WORK) {flex_timer_start();}
+
+    if (DO_WORK) { flex_timer_start(); }
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
+    if (DO_WORK) { flex_timer_end(); }
 
     /* Compute C in L1 (C00 DM) */
     if (DO_WORK) {
-        flex_timer_start();
+        flex_timer_start();  /* compute timing window */
         zero32(C, C_BYTES);
-        compute_3d(A, B, C);
+        compute_2d_gemm(A, B, C);
         uint64_t sc = addsum_u32(C, C_BYTES);
         flex_timer_end();
-        printf("[CHK] addsum(C)=0x%08x%08x\n", (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
+        printf("[CHK] addsum(C)=0x%08x%08x\n",
+               (unsigned)(sc >> 32), (unsigned)(sc & 0xFFFFFFFFu));
     }
-    
-    if (DO_WORK) {flex_timer_start();}
+
+    if (DO_WORK) { flex_timer_start(); }
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
+    if (DO_WORK) { flex_timer_end(); }
 
     /* Store C to HBM (C00 DM) */
     if (DO_WORK) {
         const uint32_t H_OFF_C = (uint32_t)HBM_C_BASE_OFFSET;
         printf("[HBM][Write] C -> 0x%08x (%u bytes)\n", (unsigned)H_OFF_C, (unsigned)C_BYTES);
         dma_write_1d_to_hbm(H_OFF_C, off_c, C_BYTES);
-        printf("[Done] 3D benchmark complete (C(0,0) DM).\n");
+        printf("[Done] 2D benchmark complete (C(0,0) DM).\n");
     }
 
-    if (DO_WORK) {flex_timer_start();}
+    if (DO_WORK) { flex_timer_start(); }
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
+    if (DO_WORK) { flex_timer_end(); }
 
     /* Everyone exits together */
     flex_eoc(0);
