@@ -141,9 +141,7 @@ int main(void)
         printf("       C=%ux%ux%u  (%u bytes)\n", (unsigned)A_DIM_A, (unsigned)A_DIM_B, (unsigned)C_DIM_C, (unsigned)C_BYTES);
     }
 
-    if (DO_WORK) {flex_timer_start();}
     flex_global_barrier_xy();
-    if (DO_WORK) {flex_timer_end();}
 
     /* L1 allocations (only C(0,0) DM) */
     void *raw_a = 0, *raw_b = 0, *raw_c = 0;
