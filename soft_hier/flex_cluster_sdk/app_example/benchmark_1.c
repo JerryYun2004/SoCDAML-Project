@@ -238,10 +238,12 @@ int main(void)
 
     /* Store C to HBM (C00 DM) */
     if (DO_WORK) {
+        flex_timer_start(); 
         const uint32_t H_OFF_C = (uint32_t)HBM_C_BASE_OFFSET;
-        printf("[HBM][Write] C -> 0x%08x (%u bytes)\n", (unsigned)H_OFF_C, (unsigned)C_BYTES);
+        //printf("[HBM][Write] C -> 0x%08x (%u bytes)\n", (unsigned)H_OFF_C, (unsigned)C_BYTES);
         dma_write_1d_to_hbm(H_OFF_C, off_c, C_BYTES);
-        printf("[Done] 2D benchmark complete (C(0,0) DM).\n");
+        //printf("[Done] 2D benchmark complete (C(0,0) DM).\n");
+        flex_timer_end(); 
     }
 
     if (DO_WORK) { flex_timer_start(); }
