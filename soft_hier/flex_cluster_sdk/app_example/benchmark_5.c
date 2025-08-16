@@ -164,8 +164,10 @@ int main(void)
         zero_f32(addr_c, BYTES_C_TILE);
     }
     if (is_timer_master) { flex_timer_end(); } 
-    
+
+    if (is_timer_master) { flex_timer_start(); } 
     flex_global_barrier_xy();
+    if (is_timer_master) { flex_timer_end(); } 
 
     /* Ordered offset prints (commented to keep only final print)
     for (uint32_t ry = 0; ry < 4u; ++ry) {
