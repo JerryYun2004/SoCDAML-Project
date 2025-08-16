@@ -143,7 +143,7 @@ int main(void)
      * =============================================================== */
     void *addr_a = (void*)0, *addr_b = (void*)0, *addr_c = (void*)0;
     uint32_t a_off = 0u, b_off = 0u, c_off = 0u;
-
+    if (is_timer_master) { flex_timer_start(); } 
     if (IS_DM) {
         const uint32_t ALIGN_DMA = 64u;
         void *raw_a = flex_l1_malloc(BYTES_A_STRIP + ALIGN_DMA);
@@ -163,6 +163,8 @@ int main(void)
 
         zero_f32(addr_c, BYTES_C_TILE);
     }
+    if (is_timer_master) { flex_timer_end(); } 
+    
     flex_global_barrier_xy();
 
     /* Ordered offset prints (commented to keep only final print)
@@ -177,7 +179,7 @@ int main(void)
         }
     }
     */
-    flex_global_barrier_xy();
+    //flex_global_barrier_xy();
 
     /* ===============================================================
      * 2) One-time HBM init via DMA (runs only on C[0,0] DM) — NOT TIMED
