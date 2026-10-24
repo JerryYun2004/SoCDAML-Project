@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "source_repository": "JerryYun2004/SoCDAML-Project",
+  "source_commit": "707cc6f0db370d16f608de7b9ff86e9c758d95e9",
+  "benchmarks": [
+    {
+      "number": 1,
+      "name": "single_cluster",
+      "path": "soft_hier/flex_cluster_sdk/app_example/gemm/single_cluster.c",
+      "original": "benchmark_1.c",
+      "source_sha256": "94a13ddf3114397f8539612bdd370993d541e3e36097ec0d7eea8ab14c7c0edc",
+      "cleaned_sha256": "e38f0fd92748f7c056d4c2f7df85c8e0782f621c86e894b57360184026e34298",
+      "current_shape": "A[64,256] * B[256,64] -> C[64,64]",
+      "kernel": "scalar_fp32",
+      "current_k": 256,
+      "slide_k": 64,
+      "slide_reproduction": "pending",
+      "intentional_edits": [
+        "Rename compute_2d_gemm to gemm_scalar_fp32; loop body unchanged.",
+        "Use SDK ELEM_BYTES with an FP32 guard instead of redefining it."
+      ],
+      "timer_intervals": [
+        "allocation",
+        "sync_after_allocation",
+        "sync_after_preload",
+        "input_dma",
+        "sync_after_input",
+        "compute_zero_and_checksum",
+        "sync_after_compute",
+        "output_dma",
+        "final_sync"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "row_direct",
+      "path": "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct.c",
+      "original": "benchmark_2.c",
+      "source_sha256": "4267ca94fe8e7cf21f77c1bb317f292e65d0400ae6d75059dbd3a61f33cb9c4b",
+      "cleaned_sha256": "1494673d0157b515449bf40a9c735e4b00ddf3cd2136e840c922283fc07f0496",
+      "current_shape": "A[64,256] * B[256,256] -> C[64,256]",
+      "kernel": "scalar_fp32",
+      "current_k": 256,
+      "slide_k": 64,
+      "slide_reproduction": "pending",
+      "intentional_edits": [
+        "Release completed preload buffers before worker allocation; apply to both row variants.",
+        "Rename compute_gemm_tile to gemm_scalar_fp32; loop body unchanged.",
+        "Namespace row C tile macro and remove unused diagnostic variables."
+      ],
+      "timer_intervals": [
+        "allocation",
+        "input_dma_with_barriers",
+        "sync_after_input",
+        "compute_and_checksum",
+        "sync_after_checksum_prints",
+        "output_dma_with_barriers",
+        "final_sync"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "row_broadcast",
+      "path": "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast.c",
+      "original": "benchmark_3.c",
+      "source_sha256": "8e1639ae760dc6a655d7daec5e4d8a070b08ac6f5c4ca524e540dd21bd4ba9d9",
+      "cleaned_sha256": "d1849f63fcd07c8c9a4bbcbec0fd4b4b0882e1b00f0e4b73fc04fd2a3be131dd",
+      "current_shape": "A[64,256] * B[256,256] -> C[64,256]",
+      "kernel": "scalar_fp32",
+      "current_k": 256,
+      "slide_k": 64,
+      "slide_reproduction": "pending",
+      "intentional_edits": [
+        "Release completed preload buffers before worker allocation; apply to both row variants.",
+        "Use coordinate-match masks for all x at sender y.",
+        "Use SDK offset wrapper to construct full local/remote DMA addresses.",
+        "Rename compute_gemm_tile to gemm_scalar_fp32; loop body unchanged.",
+        "Namespace row C tile macro and remove unused diagnostic variables."
+      ],
+      "timer_intervals": [
+        "allocation",
+        "sync_after_allocation",
+        "input_dma_and_broadcast_with_barriers",
+        "sync_after_input",
+        "compute_and_checksum",
+        "sync_after_checksum_prints",
+        "output_dma_with_barriers",
+        "final_sync"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "grid_direct",
+      "path": "soft_hier/flex_cluster_sdk/app_example/gemm/grid_direct.c",
+      "original": "benchmark_4.c",
+      "source_sha256": "d39cf4221cf39f7471409dd14e4c5a267c47020181b34b463f8c8f082db8b583",
+      "cleaned_sha256": "4adb03cf51e0246d895f100aab9e2d63e106a58c6356f1b264e4ba06bf4ff61a",
+      "current_shape": "A[256,256] * B[256,256] -> C[256,256]",
+      "kernel": "scalar_fp32",
+      "current_k": 256,
+      "slide_k": 64,
+      "slide_reproduction": "pending",
+      "intentional_edits": [
+        "Rename matmul_64x256_256x64 to gemm_scalar_fp32; loop body unchanged.",
+        "Remove unused grid checksum calculations/helpers and unused offsets; compute interval now contains the kernel only."
+      ],
+      "timer_intervals": [
+        "allocation_and_zero",
+        "sync_after_allocation",
+        "input_dma_with_barriers",
+        "sync_after_input",
+        "compute",
+        "sync_after_compute",
+        "output_dma_with_barriers",
+        "final_sync"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "grid_broadcast",
+      "path": "soft_hier/flex_cluster_sdk/app_example/gemm/grid_broadcast.c",
+      "original": "benchmark_5.c",
+      "source_sha256": "56a780d05874313dd09e11d4fe93023893754c9641e9da7f0e0979dfd268e7a9",
+      "cleaned_sha256": "6029e63c570e4b2e14809999dfb9ef3402a5b68b512b4d27143da303a258224e",
+      "current_shape": "A[256,256] * B[256,256] -> C[256,256]",
+      "kernel": "scalar_fp32",
+      "current_k": 256,
+      "slide_k": 64,
+      "slide_reproduction": "pending",
+      "intentional_edits": [
+        "Use coordinate-match masks: row (0,15), column (15,0).",
+        "Rename matmul_64x256_256x64 to gemm_scalar_fp32; loop body unchanged.",
+        "Remove unused grid checksum calculations/helpers and unused offsets; compute interval now contains the kernel only."
+      ],
+      "timer_intervals": [
+        "allocation_and_zero",
+        "sync_after_allocation",
+        "leader_input_dma_with_barriers",
+        "sync_after_input",
+        "broadcast_with_barriers",
+        "sync_after_broadcast",
+        "compute",
+        "sync_after_compute",
+        "parallel_output_dma_master_interval",
+        "final_sync"
+      ]
+    }
+  ],
+  "required_sdk_header_sha256": {
+    "soft_hier/flex_cluster_sdk/runtime/include/fixed_proj.h": "2e50da59b79945606e9c617233ef3047835b4b80d5d307b46399ba00cc01bbe2"
+  },
+  "historical_reproduction_verified": false,
+  "native_validation_of_cleanup": "pending"
+}

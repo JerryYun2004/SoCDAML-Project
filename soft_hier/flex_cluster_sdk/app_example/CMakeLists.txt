@@ -1,18 +1,21 @@
-# # Specify the source files for the "src" module
-# set(SRC_SOURCES
-#     ${CMAKE_CURRENT_SOURCE_DIR}/main.c
-# )
+set(SOCDAML_APP "$ENV{SOCDAML_APP}")
 
-# # Make sources and include paths visible to the main CMakeLists.txt
-# set(SOURCES ${SRC_SOURCES} PARENT_SCOPE)
-# set(nfvpNCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include PARENT_SCOPE)
+if("${SOCDAML_APP}" STREQUAL "")
+    set(SOCDAML_APP "diagnostics/timer")
+endif()
 
-set(SRC_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/main_test.c
-    # ${CMAKE_CURRENT_SOURCE_DIR}/../../flex_cluster_sdk/runtime/include/fix_proj.c
+set(APP_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/${SOCDAML_APP}.c"
 )
 
-set(SOURCES ${SRC_SOURCES} PARENT_SCOPE)
+if(NOT EXISTS "${APP_SOURCE}")
+    message(FATAL_ERROR "Application source not found: ${APP_SOURCE}")
+endif()
+
+message(STATUS "SoCDAML application: ${SOCDAML_APP}")
+
+set(SOURCES "${APP_SOURCE}" PARENT_SCOPE)
 set(INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../flex_cluster_sdk/runtime/include
-    PARENT_SCOPE)
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PARENT_SCOPE
+)

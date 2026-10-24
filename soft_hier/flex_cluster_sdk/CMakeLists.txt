@@ -27,9 +27,17 @@ endif()
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/runtime/flex_memory.ld)
 
 
+# Rebuild when SDK headers change or new headers are added.
+file(GLOB_RECURSE SOCDAML_SDK_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/runtime/include/*.h"
+    "${SRC_DIR}/*.h"
+)
+
 add_custom_command(
     OUTPUT softhier.elf
     COMMAND ${COMPILER} -I ${CMAKE_SOURCE_DIR}/runtime/include -I ${INCLUDE_DIRS} -T ${LINKER_SCRIPT} -nostartfiles -mabi=ilp32d -mcmodel=medlow -march=${RISCV_ARCH} -g -O3 -ffast-math -fno-builtin -fno-tree-vectorize -fno-common -ffunction-sections -Wl,--gc-sections -o softhier.elf ${CMAKE_SOURCE_DIR}/runtime/flex_start.s ${SOURCES}
+    DEPENDS ${SOURCES} ${SOCDAML_SDK_HEADERS}
+            "${CMAKE_SOURCE_DIR}/runtime/flex_start.s" "${LINKER_SCRIPT}"
     COMMENT "Generating softhier.elf"
 )
 
@@ -43,5 +51,7 @@ add_custom_command(
 )
 
 add_custom_target(dump ALL DEPENDS softhier.dump)
+# SoCDAML: serialize the shared ELF producer before the dump target.
+add_dependencies(dump build_output)
 
 
