@@ -15,7 +15,7 @@ recorded separately in
 [`packaged-workflow-verification.json`](../../../docs/project/reproduction/spatz_grid_v2/packaged-workflow-verification.json).
 The original reference JSON/chart are preserved, not replaced or averaged.
 
-The target files under
+The four accepted target files directly under
 `soft_hier/flex_cluster_sdk/app_example/gemm/spatz_grid_v2/` and the modules in
 `validated/` are byte-for-byte accepted copies. `direct_checks.py`,
 `broadcast_checks.py` and `capture.py` retain accepted helper function bodies
@@ -123,12 +123,14 @@ and refuses interrupted captures. It does not weaken checks to accept a partial 
 results="$repo_root/docs/project/reproduction/spatz_grid_v2"
 "$py" "$runner" --native-root "$native_root" results \
   --direct "$direct" --broadcast "$broadcast" \
-  --output "$results/accepted-results.json"
+  --output "$results/regenerated-results.json"
 MPLCONFIGDIR="$native_root/build/matplotlib-cache" \
   "$py" "$repo_root/tools/socdaml/spatz_grid_v2/plot_results.py" \
-  "$results/accepted-results.json" --output "$results/phase-breakdown"
+  "$results/regenerated-results.json" --output "$results/regenerated-phase-breakdown"
 ```
 
+Use a fresh output filename; the CLI refuses to overwrite existing results.
+The preserved accepted JSON/chart remain the reference.
 The summary is regenerated from strict offline checks of raw accepted logs and
 contains evidence/report/archive/ELF hashes. The PNG/SVG chart reads that JSON,
 asserts the phase sum equals the continuous interval, and uses simulated ns only.
@@ -148,3 +150,59 @@ run and one packaged CLI verification. All measured durations matched exactly;
 this small check is not a statistical variability estimate. The earlier
 intermittent startup timeout remains unexplained. Fresh-machine provisioning
 has not been verified; successful runs do not establish the timeout's resolution.
+
+## Separate controlled parallel-output experiment
+
+`direct_parallel` selects the separately attributed experimental driver under
+`spatz_grid_v2/experimental/`. It changes only the output selection of the
+benchmark-4-derived direct reconstruction to use the accepted broadcast driver's
+parallel output implementation, DMA completion wait and final join. It is new
+experimental code, not recovered historical benchmark 4. The original `direct`
+variant and original accepted results remain intact. Exact-source guards enforce
+this one-selection difference; the accepted kernel/parser/model remain pinned.
+
+Compile only the new application using the installed compiler:
+
+```bash
+"$py" "$runner" --native-root "$native_root" build --variant direct_parallel
+```
+
+Use the fresh path printed by `build` as `experimental_build`. Each of the next
+commands explicitly starts one simulation; execute the second only if the first
+passes. Both retain fixed 300-second / 64-MiB limits, PTY draining, sparse events,
+concurrent sample attempts and no retry. Reuse the existing broadcast build ELF.
+
+```bash
+"$py" "$runner" --native-root "$native_root" run --variant direct_parallel \
+  --elf "$experimental_build/grid_direct_parallel.elf"
+"$py" "$runner" --native-root "$native_root" run --variant broadcast \
+  --elf "$native_root/logs/spatz-grid-v2-build-qcdpszj6/grid_broadcast.elf"
+```
+
+All existing direct-input numerical, DMA, vector-workload and timing checks apply
+to `direct_parallel`. Additional checks require per-cluster output completion
+within its local t5..t6 phase and observed overlap of output DMA transactions in
+both variants. Validation and validation-only joins remain after t7. Captures
+include the runner and orchestration/checker sources, CLI argv/cwd, simulator
+argv/environment, model config, target sources, artifact hashes and archive.
+
+For offline comparison, use **new evidence paths** and a **new output file**:
+
+```bash
+"$py" "$runner" --native-root "$native_root" results \
+  --direct-variant direct_parallel --direct "$experimental_evidence" \
+  --broadcast "$controlled_broadcast_evidence" --output "$controlled_results"
+"$py" "$repo_root/tools/socdaml/spatz_grid_v2/plot_results.py" \
+  "$controlled_results" --output "$controlled_chart_stem"
+```
+
+The result writer refuses to overwrite an existing JSON file. Chart labels and
+attribution recognize the separate controlled schema. Original accepted JSON,
+charts and the 1.965× / 1.196× comparison are preserved. Focused host checks:
+`"$py" -m unittest discover -s tools/socdaml/spatz_grid_v2 -p test_output_policy.py -v`.
+
+The controlled pair completed successfully on 2026-10-26, one run each. See
+[controlled results, boundaries and limitations](../../../docs/project/SPATZ_GRID_V2_CONTROLLED_OUTPUT.md).
+Complete input/application times are 13.550/59.911 µs versus 6.904/53.273 µs;
+input/application speedups are 1.963× / 1.125×. Both outputs are parallel,
+with output/final-join totals 3.616 / 3.621 µs. Original results remain unchanged.

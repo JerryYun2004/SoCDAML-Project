@@ -233,3 +233,12 @@ port. Raw evidence availability is required for offline validation. Two matching
 observations per variant are a small repeatability check, not a distribution or
 stability guarantee. The intermittent timeout remains unexplained and is not
 claimed fixed.
+
+
+## Separate controlled experiment
+
+The [parallel-output controlled experiment](SPATZ_GRID_V2_CONTROLLED_OUTPUT.md)
+compares a new direct-input/parallel-output derivative against the existing
+broadcast-input/parallel-output variant. Its separate data and charts do not
+replace the original 1.965× input-readiness and 1.196× complete-schedule results
+above. The original direct variant retains serialized output.

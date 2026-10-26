@@ -1,0 +1,380 @@
+{
+  "DMA_envelope_decomposition_delta_cycles": {
+    "DMA_envelope": -25,
+    "last_DMA_to_readiness": 6,
+    "t0_to_first_DMA_start": 4,
+    "total": -15
+  },
+  "disassembly_files": {
+    "logs/spatz-grid-v2-build-pqckwors/direct-source-lines.dump": "ec9abc4db3f22ce43d19f0513d691d0b5efc8eec38f959ce55ac1f609590ca35",
+    "logs/spatz-grid-v2-build-pqckwors/direct_parallel-source-lines.dump": "299e32e375c419c3458b0e0a5f43fb480219444cd09b5c0c55648747045e9f73",
+    "logs/spatz-grid-v2-build-pqckwors/grid_direct_parallel.dump": "7d2d6025690765dbea72486df9463dc6dd7281c0c92389712e3d77192b63a9c7",
+    "logs/spatz-grid-v2-build-qcdpszj6/grid_direct.dump": "b2bb8f91faefdeeb52371c9629db730861619e0c1aa3971b8bd859646b1e2121"
+  },
+  "disassembly_observations": [
+    "Original direct t0 rdcycle at 0x80002ad4; experimental at 0x80002ad8.",
+    "Original direct t1 rdcycle at 0x80002b44 and t2 at 0x80002b54; experimental at 0x80002b48 and 0x80002b58.",
+    "Same input scheduling loops and barrier targets; register assignments, stack stores and code addresses differ.",
+    "For example original non-DM input-loop exit uses sw zero,28(sp) at 0x80002b38; experimental uses li s5,0 at 0x80002b3c. This static difference does not establish the dynamic 15-cycle cause."
+  ],
+  "global_barrier_function_bytes_identical": true,
+  "input_DMA_configuration_and_order_identical": true,
+  "input_DMA_configurations_in_observed_order": [
+    {
+      "cid": 0,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221226496,
+      "txn": 576,
+      "type": "1D"
+    },
+    {
+      "cid": 0,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292032,
+      "src_stride": 1024,
+      "txn": 577,
+      "type": "2D"
+    },
+    {
+      "cid": 1,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221226496,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 1,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292288,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 2,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221226496,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 2,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292544,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 3,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221226496,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 3,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292800,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 4,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221242880,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 4,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292032,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 5,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221242880,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 5,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292288,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 6,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221242880,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 6,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292544,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 7,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221242880,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 7,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292800,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 8,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221259264,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 8,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292032,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 9,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221259264,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 9,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292288,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 10,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221259264,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 10,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292544,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 11,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221259264,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 11,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292800,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 12,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221275648,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 12,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292032,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 13,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221275648,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 13,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292288,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 14,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221275648,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 14,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292544,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    },
+    {
+      "cid": 15,
+      "dst": 65536,
+      "size": 16384,
+      "src": 3221275648,
+      "txn": 0,
+      "type": "1D"
+    },
+    {
+      "cid": 15,
+      "dst": 81920,
+      "dst_stride": 256,
+      "repeats": 64,
+      "size": 256,
+      "src": 3221292800,
+      "src_stride": 1024,
+      "txn": 1,
+      "type": "2D"
+    }
+  ],
+  "input_DMA_count_per_run": 32,
+  "input_barriers_per_core": {
+    "completion_join": 1,
+    "scheduling": 32
+  },
+  "original_accepted_and_packaged_direct_disassembly_instructions_identical": true,
+  "phase_delta_controlled_minus_original_cycles": {
+    "completion_join": 2,
+    "input_schedule": -17,
+    "readiness": -15
+  },
+  "qualification": "Net difference located in captured intervals; exact causal attribution unresolved. No substantive input-policy change found. Static scalar code differences and DMA completion timings do not isolate why these cycles differ; no new trace/simulation requested or performed.",
+  "records": {
+    "controlled": {
+      "actual_input_DMA_envelope_cycles": 13234,
+      "evidence_id": "spatz-grid-v2-direct_parallel-zg7i0wnu",
+      "first_actual_DMA_start_relative_t0": 127,
+      "input_readiness_cycles": 13550,
+      "input_schedule_cycles": 13456,
+      "last_DMA_to_readiness_cycles": 189,
+      "last_actual_DMA_completion_relative_t0": 13361,
+      "master_t0_t4": [
+        1457895,
+        1471351,
+        1471445,
+        1471445,
+        1471445
+      ],
+      "required_completion_join_cycles": 94
+    },
+    "original": {
+      "actual_input_DMA_envelope_cycles": 13259,
+      "evidence_id": "presentation-grid-direct-v2-0puwdfmc",
+      "first_actual_DMA_start_relative_t0": 123,
+      "input_readiness_cycles": 13565,
+      "input_schedule_cycles": 13473,
+      "last_DMA_to_readiness_cycles": 183,
+      "last_actual_DMA_completion_relative_t0": 13382,
+      "master_t0_t4": [
+        1457894,
+        1471367,
+        1471459,
+        1471459,
+        1471459
+      ],
+      "required_completion_join_cycles": 92
+    }
+  },
+  "schema": "socdaml_controlled_input_delta_review_v1",
+  "simulations": 0,
+  "source_input_functions_and_t0_through_t4_region_identical": true,
+  "status": "input_policy_equivalent_exact_cycle_cause_unresolved"
+}

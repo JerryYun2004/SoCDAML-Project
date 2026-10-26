@@ -19,7 +19,7 @@ import tempfile
 sys.dont_write_bytecode = True
 from common import (ASSETS, PACKAGE, REFERENCE, REPO, config_fingerprint, grid,
                     metadata, model_guard, native, read, require, verify_artifacts,
-                    verify_package, write)
+                    verify_package, write, target_sources, source_hashes, EXPERIMENT)
 import broadcast_checks
 import direct_checks
 import capture
@@ -40,20 +40,41 @@ def validate(evidence, variant, root):
     elf = evidence/('grid_'+variant+'.elf')
     require(hashlib.sha256(grid.kernel_bytes(elf.read_bytes())).hexdigest()==meta['kernel_sha256'],
             'Shared kernel bytes differ.')
-    for name, digest in meta['exact_source_sha256'].items():
+    for name, digest in source_hashes(variant).items():
         require(native.sha(evidence/name)==digest, 'Captured target source differs: '+name)
+    if variant==EXPERIMENT:
+        build_record=read(evidence/'build.json')
+        require(build_record['source_sha256']==source_hashes(variant) and
+                build_record['artifacts'][elf.name]==native.sha(elf) and
+                variant in build_record['variants'], 'Experimental ELF/build provenance mismatch.')
     config = read(evidence/'runtime-config.json')
     require(config['target']['clock']['frequency']==1_000_000_000, 'Expected 1-GHz clock.')
     require(config_fingerprint(config,root)==meta['model_config_fingerprint'], 'Runtime hardware/model differs.')
     text = (evidence/'trace.log').read_text(errors='replace')
     text, progress, dma, times, computes, vector_ends = direct_checks.inspect_trace(text)
-    result = grid.verify_log(text,'grid_'+variant,require_trace=True)
-    checks = direct_checks if variant=='direct' else broadcast_checks
+    result = grid.verify_log(text,'grid_'+('direct' if variant==EXPERIMENT else variant),require_trace=True)
+    result['variant'] = 'grid_'+variant
+    checks = direct_checks if variant in ('direct',EXPERIMENT) else broadcast_checks
     details = checks.extra_checks(dma,times,computes,vector_ends,result)
+    if variant in (EXPERIMENT,'broadcast'):
+        parallel_output_checks(details,times,computes)
     require(result['checked_words']==262144, 'Incomplete word validation.')
     require(sum(result['master_phase_cycles'].values())==result['application_cycles'], 'Non-contiguous phase sum.')
     return dict(result=result,details=details,progress=progress,
                 input_sha256=broadcast_checks.input_fingerprint(text))
+
+
+def parallel_output_checks(details, times, computes):
+    outputs=[e for e in details['application_dma'] if e['kind']=='OUT']
+    require(len(outputs)==16, 'Expected one parallel output DMA per cluster.')
+    for event in outputs:
+        cid=event['cid']
+        require(times[cid][5]<=event['start']<=event['end']<=times[cid][6],
+                'Output must complete within local issue/wait phase.')
+        require(computes[cid]['begin']>=times[cid][4], 'Compute precedes input readiness.')
+    require(any(a['start']<b['end'] and b['start']<a['end'] for i,a in enumerate(outputs) for b in outputs[i+1:]),
+            'No overlap observed in parallel output DMAs.')
+    details['output_dma_overlap_observed']=True
 
 
 def build(root, variant, output_dir=None):
@@ -68,8 +89,8 @@ def build(root, variant, output_dir=None):
     objcopy = cc.with_name('riscv32-unknown-elf-objcopy')
     objdump = cc.with_name('riscv32-unknown-elf-objdump')
     env = native.profile_env(root,profile)
-    for name in metadata()['exact_source_sha256']:
-        shutil.copy2(ASSETS/name,batch/name)
+    for name,path in target_sources(variant).items():
+        shutil.copy2(path,batch/name)
     commands = [[cc,*native.FLAGS,'-c',batch/'gemm_fp32.S','-o',batch/'gemm_fp32.o'],
                 [objcopy,'--rename-section','.text.socdaml_spatz_gemm='+grid.SECTION+',alloc,load,readonly,code,contents',batch/'gemm_fp32.o',batch/'shared_gemm.o']]
     sdk = profile/'source'/native.SDK
@@ -90,7 +111,7 @@ def build(root, variant, output_dir=None):
         (batch/('grid_'+name+'.dump')).write_text(subprocess.check_output([objdump,'-d',elf],text=True,env=env))
     model_guard(root)
     record = dict(status='built_not_simulated',variants=selected,commands=[[str(x) for x in c] for c in commands],
-                  source_sha256=metadata()['exact_source_sha256'],kernel_sha256=metadata()['kernel_sha256'],
+                  source_sha256=source_hashes(variant),kernel_sha256=metadata()['kernel_sha256'],
                   model_source_sha256=native.sha(REFERENCE/'configured-source.json'))
     record['artifacts'] = {p.name:native.sha(p) for p in batch.iterdir() if p.is_file()}
     write(batch/'build.json',record)
@@ -100,12 +121,12 @@ def build(root, variant, output_dir=None):
 def check_elf(elf, variant):
     meta = verify_package()
     require(hashlib.sha256(grid.kernel_bytes(elf.read_bytes())).hexdigest()==meta['kernel_sha256'], 'Kernel differs.')
-    if native.sha(elf)==meta['accepted_elf_sha256'][variant]:
+    if native.sha(elf)==meta['accepted_elf_sha256'].get(variant):
         return
     record = read(elf.parent/'build.json')
     verify_artifacts(elf.parent,record['artifacts'])
     require(record['status']=='built_not_simulated' and variant in record['variants'] and
-            record['source_sha256']==meta['exact_source_sha256'], 'Unknown executable provenance.')
+            record['source_sha256']==source_hashes(variant), 'Unknown executable provenance.')
 
 
 def run(root, variant, elf):
@@ -114,14 +135,20 @@ def run(root, variant, elf):
     batch = Path(tempfile.mkdtemp(prefix='spatz-grid-v2-'+variant+'-',dir=root/'logs'))
     original = native.tree_manifest(root/'source')
     state = dict(status='preflight',variant='grid_'+variant,seconds_limit=300,byte_limit=64*1024*1024,
+                 repository_cli=[sys.executable,*sys.argv],repository_cli_cwd=str(Path.cwd()),
                  simulations_launched=0,timing_accepted=False)
     try:
-        for name in metadata()['exact_source_sha256']:
-            shutil.copy2(ASSETS/name,batch/name)
+        for name,path in target_sources(variant).items():
+            shutil.copy2(path,batch/name)
+        if variant==EXPERIMENT:
+            shutil.copy2(elf.parent/'build.json',batch/'build.json')
         shutil.copy2(elf,batch/('grid_'+variant+'.elf'))
         for file in (PACKAGE/'validated').glob('*.py'):
             dest=batch/'checking-tools'/file.name;dest.parent.mkdir(exist_ok=True);shutil.copy2(file,dest)
         shutil.copy2(__file__,batch/'packaged-runner.py')
+        for name in ('common.py','capture.py','direct_checks.py','broadcast_checks.py','trace_allowlist.py'):
+            dest=batch/'orchestration-tools'/name;dest.parent.mkdir(exist_ok=True)
+            shutil.copy2(PACKAGE/name,dest)
         write(batch/'regex-verification.json',trace_allowlist.verify())
         command = [str(profile/'install/bin/gvsoc'),'--target=pulp.chips.flex_cluster.flex_cluster',
                    '--binary',str(batch/('grid_'+variant+'.elf')),'run','--trace-level=debug',
@@ -162,8 +189,8 @@ def run(root, variant, elf):
     return dict(status=state['status'],evidence=str(batch))
 
 
-def results(direct, broadcast, root, output):
-    records={name:validate(path,name,root) for name,path in [('direct',direct),('broadcast',broadcast)]}
+def results(direct, broadcast, root, output, direct_variant='direct'):
+    records={name:validate(path,direct_variant if name=='direct' else name,root) for name,path in [('direct',direct),('broadcast',broadcast)]}
     a,z=records['direct'],records['broadcast']
     require(a['input_sha256']==z['input_sha256'],'Paired delivered inputs differ.')
     require(a['result']['output_sha256']==z['result']['output_sha256'],'Paired final output differs.')
@@ -183,10 +210,41 @@ def results(direct, broadcast, root, output):
     for name,path in [('direct',direct),('broadcast',broadcast)]:
         v=records[name]
         accepted['variants'][name]=dict(evidence_id=path.name,report_sha256=native.sha(path/'report.json'),
-              archive_sha256=native.sha(path.with_suffix('.tar.gz')),elf_sha256=native.sha(path/('grid_'+name+'.elf')),
+              archive_sha256=native.sha(path.with_suffix('.tar.gz')),elf_sha256=native.sha(path/('grid_'+(direct_variant if name=='direct' else name)+'.elf')),
               phase_ns=v['result']['master_phase_cycles'],application_ns=v['result']['application_cycles'],
               complete_input_ns=v['result']['input_stage_through_completion_cycles'],DMA_envelope_ns=v['details']['data_in_actual_dma_envelope_ns'],
               input_sha256=v['input_sha256'],output_sha256=v['result']['output_sha256'],checked_words=v['result']['checked_words'])
+    if direct_variant==EXPERIMENT:
+        accepted['schema']='socdaml_spatz_grid_v2_controlled_parallel_output_v1'
+        accepted['direct_variant']=EXPERIMENT
+        accepted['limitations'][2]='Both output schedules parallel; new benchmark-4-derived experiment, not recovered historical code.'
+        for name in ('direct','broadcast'):
+            phase=accepted['variants'][name]['phase_ns']
+            accepted['variants'][name]['output_and_final_sync_ns']=phase['output_schedule']+phase['final_sync']
+        accepted['output_policy']='parallel on all 16 DM cores, same DMA/wait/global-join implementation'
+        for metric,keys in [('compute_and_required_sync',('compute_and_required_sync',)),
+                            ('output_and_final_sync',('output_schedule','final_sync'))]:
+            values=[sum(accepted['variants'][name]['phase_ns'][key] for key in keys)
+                    for name in ('direct','broadcast')]
+            accepted['comparisons'][metric]=compare(*values)
+        accepted['checkpoint_preserved']='082c5e8bbd37975079168f82f2fd9a91fc87ba88'
+        accepted['model_config_fingerprint']=metadata()['model_config_fingerprint']
+        accepted['build_review']='controlled-prelaunch.json'
+        argv=read(direct/'report.json')['repository_cli']
+        build_dir=Path(argv[argv.index('--elf')+1]).parent
+        accepted['build_evidence_id']=build_dir.name
+        for name,path in [('direct',direct),('broadcast',broadcast)]:
+            report=read(path/'report.json')
+            accepted['variants'][name]['artifacts']=report['artifacts']
+            accepted['variants'][name]['repository_cli']=report['repository_cli']
+            accepted['variants'][name]['host_seconds_not_performance']=report['host_elapsed_seconds']
+            accepted['variants'][name]['captured_bytes']=report['bytes_captured']
+            accepted['variants'][name]['seconds_limit']=report['seconds_limit']
+            accepted['variants'][name]['byte_limit']=report['byte_limit']
+        build_archive=build_dir.with_suffix('.tar.gz')
+        accepted['build_archive_sha256']=native.sha(build_archive) if build_archive.is_file() else None
+
+    require(not output.exists(), 'Refusing to replace existing result file.')
     write(output,accepted)
     return accepted
 
@@ -197,15 +255,16 @@ def main():
     sub=parser.add_subparsers(dest='action',required=True)
     sub.add_parser('check',help='Read-only package/native dependency and regex checks; no tool launch.')
     builder=sub.add_parser('build',help='Compile applications only, never rebuild the model.')
-    builder.add_argument('--variant',choices=('direct','broadcast','both'),default='both')
+    builder.add_argument('--variant',choices=('direct','broadcast',EXPERIMENT,'both'),default='both')
     builder.add_argument('--output-dir',type=Path,help='Fresh directory under native/logs; must not exist.')
     runner=sub.add_parser('run',help='One explicit 300-second/64-MiB PTY run, no retry.')
-    runner.add_argument('--variant',choices=('direct','broadcast'),required=True)
+    runner.add_argument('--variant',choices=('direct','broadcast',EXPERIMENT),required=True)
     runner.add_argument('--elf',type=Path,required=True)
     validator=sub.add_parser('validate',help='Offline complete-run validation.')
-    validator.add_argument('--variant',choices=('direct','broadcast'),required=True)
+    validator.add_argument('--variant',choices=('direct','broadcast',EXPERIMENT),required=True)
     validator.add_argument('--evidence',type=Path,required=True)
     pair=sub.add_parser('results',help='Offline revalidation and machine-readable pair summary.')
+    pair.add_argument('--direct-variant',choices=('direct',EXPERIMENT),default='direct')
     pair.add_argument('--direct',type=Path,required=True)
     pair.add_argument('--broadcast',type=Path,required=True)
     pair.add_argument('--output',type=Path,required=True)
@@ -221,7 +280,7 @@ def main():
             else:result=run(root,args.variant,args.elf.expanduser().resolve())
     elif args.action=='validate':
         result=validate(args.evidence,args.variant,root)
-    else:result=results(args.direct.resolve(),args.broadcast.resolve(),root,args.output)
+    else:result=results(args.direct.resolve(),args.broadcast.resolve(),root,args.output,args.direct_variant)
     print(json.dumps(result,indent=2))
 
 

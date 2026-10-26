@@ -781,3 +781,110 @@ Checkpoint scope is repository-owned V2 code, source/provenance/results/chart,
 workflow documentation and handoff, plus only the V2 portions of existing
 README diffs. Earlier proposal/scalar edits, dirty submodules, native builds,
 toolchains and raw traces are excluded. No push or amend is authorized.
+
+
+## 2026-10-26 — controlled input comparison with parallel output
+
+Preserved checkpoint `082c5e8bbd37975079168f82f2fd9a91fc87ba88`, original
+accepted captures/archives, source, kernel, results JSON and chart. No commit,
+push, environment/model rebuild or unrelated edit. Added separately named
+`direct_parallel`, a new benchmark-4-derived experiment using benchmark-5's
+parallel output implementation; **not recovered historical benchmark 4**.
+Original `direct` remains serialized. Exact-source guard allows only the new
+attribution/policy header and output-selection change. No workload, input,
+precision, GEMM, input schedule, measurement or validation change.
+
+Prelaunch: three targeted output-policy host tests passed; pinned model/compiler
+and sparse POSIX-BRE trace checks passed. New app compiled only in
+`logs/spatz-grid-v2-build-pqckwors`. Existing broadcast ELF reused. Reviewed source
+and source-mapped disassembly; shared kernel hash unchanged; output DMA issue/
+completion-wait bytes identical, with different setup spills/registers and
+relocations. Review receipt: `reproduction/spatz_grid_v2/controlled-prelaunch.json`.
+Frozen build/review archive hash is in the new results JSON.
+
+Exact commands (from native root after `source env.sh`, no retry):
+
+```bash
+# Build command was issued from the cleanup repository root using the same env:
+PYTHONDONTWRITEBYTECODE=1 /Users/jerryyun/projects/SoCDAML-native/venv/bin/python tools/socdaml/spatz_grid_v2/reproduce.py --native-root /Users/jerryyun/projects/SoCDAML-native build --variant direct_parallel
+# Then, sequentially, from native root:
+PYTHONDONTWRITEBYTECODE=1 venv/bin/python /Users/jerryyun/projects/SoCDAML-Project-cleanup/tools/socdaml/spatz_grid_v2/reproduce.py --native-root /Users/jerryyun/projects/SoCDAML-native run --variant direct_parallel --elf /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-build-pqckwors/grid_direct_parallel.elf
+PYTHONDONTWRITEBYTECODE=1 venv/bin/python /Users/jerryyun/projects/SoCDAML-Project-cleanup/tools/socdaml/spatz_grid_v2/reproduce.py --native-root /Users/jerryyun/projects/SoCDAML-native run --variant broadcast --elf /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-build-qcdpszj6/grid_broadcast.elf
+```
+
+Exactly two simulations, fixed **300 seconds / 64 MiB** each, both passed all
+262,144 numerical words, 82,944 expected vector operations across 16 clusters,
+DMA/compute completion boundaries, validation exclusion, matching inputs/outputs
+and model/source/kernel preservation. Parallel output overlap observed in both.
+Evidence/adjacent archives under native/logs:
+
+- `spatz-grid-v2-direct_parallel-zg7i0wnu`: 76.592 host seconds, 19,105,027 bytes.
+- `spatz-grid-v2-broadcast-9d4vsocw`: 79.298 host seconds, 19,065,262 bytes.
+
+| Simulated µs | Direct input / parallel output | Broadcast / parallel output |
+|---|---:|---:|
+| Complete input readiness | 13.550 | 6.904 |
+| Compute + required join | 42.745 | 42.748 |
+| Output + final join | 3.616 | 3.621 |
+| Continuous application | 59.911 | 53.273 |
+
+Input speedup **1.963×**, saving **6.646 µs**; application speedup
+**1.125×**, saving **6.638 µs (11.08%)**. Broadcast input includes HBM fetch,
+distribution and both required joins. Matching parallel output source/policy
+still measures **5 ns longer** for broadcast (issue/wait phase +4 ns, join +1 ns).
+The experimental direct input readiness is **15 ns shorter** than original direct
+(HBM schedule −17 ns, join +2 ns); actual input DMA envelope −25 ns. Input source
+schedule is unchanged, but scalar code generation/placement is not byte-identical;
+no exact-cause or cycle-equivalence claim. Broadcast matches original phases.
+Original 1.965× / 1.196× schedule comparison remains unchanged and separate.
+
+Published [controlled report](SPATZ_GRID_V2_CONTROLLED_OUTPUT.md), separate
+`controlled-parallel-results.json`, machine-generated PNG/SVG chart, prelaunch
+review and `controlled-evidence-checks.json` under `reproduction/spatz_grid_v2/`.
+Verified 24 captured artifact hashes in each archive plus archived report bytes,
+phase sums, paired inputs/outputs and unchanged original report/archive/checkpoint
+assets. Chart visually inspected. Repository CLI documentation covers build,
+run and strict offline validation/results; results refuse to overwrite files.
+
+Limitations: one controlled run per variant, no variability estimate or historical
+slide equivalence. Earlier intermittent timeout remains unexplained; no failure
+occurred and no timeout investigation was started. Fresh-machine provisioning/
+relocation remains unverified. Next action: review this separate controlled
+experiment; no follow-up simulation or commit is authorized by this step.
+
+
+## 2026-10-26 — controlled-output final review and local checkpoint
+
+No new simulations or environment rebuilds. Reused the completed three targeted
+output-policy host checks and both accepted controlled captures. Reviewed original
+direct versus `direct_parallel` input source, source-mapped disassembly, all 32
+input DMA configurations/order, and phase evidence. **No unintended substantive
+input-policy change found.** Input functions/t0..t4 source, A-then-B/y-major-x-minor
+schedule, DMA waits, 32 scheduling barriers and required join remain equivalent;
+compiled global-barrier bytes match. Original accepted direct instructions match
+the saved packaged direct disassembly. Experimental scalar instructions differ.
+
+The −15-cycle readiness difference is **−17 cycles in t0..t1 plus +2 in t1..t2**.
+Relative to actual DMA events it is +4 before first start, −25 in the completion
+envelope, and +6 after last completion. **Exact causal attribution is unresolved**;
+static disassembly differences do not prove an explanation. No timings adjusted.
+Details: `reproduction/spatz_grid_v2/controlled-input-delta-review.json` and the
+controlled report. This qualification does not indicate a changed input policy.
+
+Labels finalized: original complete schedules **1.965× input / 1.196× application**;
+matched parallel output **1.963× input / 1.125× application**. Controlled input saving
+**6.646 µs**, offset by **3 ns** more compute/join and **5 ns** more output/join,
+leaves **6.638 µs (approximately 11.08%)** application saving. Full numerical
+precision remains in results JSON; prose/chart durations use sensible rounding.
+One controlled observation each, unresolved historical timeout, reconstruction
+rather than historical-code equivalence, and unverified fresh provisioning/
+relocation remain explicit.
+
+Arithmetic, documentation paths/anchors, scoped diff and preservation checked.
+Checkpoint scope: experimental driver/README, CLI selection/check/report/plot
+support, targeted test, controlled results/review/receipts/chart and related V2
+documentation only. Original results/captures preserved; unrelated edits, dirty
+submodules, build directories, toolchains and raw traces excluded. Local commit
+message: `Add controlled input comparison with matched parallel output`.
+No push or another experiment. Next action: review the local checkpoint with the
+unresolved 15-cycle qualification; further simulation needs separate authorization.

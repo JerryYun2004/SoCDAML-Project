@@ -1,0 +1,43 @@
+{
+  "archives": {
+    "broadcast": {
+      "artifacts_verified_in_archive": 24,
+      "report_and_archive_sha256_verified": true
+    },
+    "direct": {
+      "artifacts_verified_in_archive": 24,
+      "report_and_archive_sha256_verified": true
+    }
+  },
+  "charts_visually_inspected": true,
+  "checkpoint_HEAD": "082c5e8bbd37975079168f82f2fd9a91fc87ba88",
+  "finalization": {
+    "completed_targeted_tests_reused": 3,
+    "documentation_links_and_fragments_checked": 29,
+    "exact_15_cycle_cause": "unresolved",
+    "input_policy_equivalent": true,
+    "input_policy_review": "controlled-input-delta-review.json",
+    "input_policy_review_sha256": "0e67a7d371d9bc2fa40d3c7dab00626a4612e3b9d1fdb64bc23985b4d3492148",
+    "new_simulations": 0,
+    "original_checkpoint_results_sources_charts_unchanged": true,
+    "result_arithmetic": "passed"
+  },
+  "original_accepted_report_and_archive_hashes_unchanged": true,
+  "original_checkpoint_assets_byte_equal": [
+    "docs/project/reproduction/spatz_grid_v2/accepted-results.json",
+    "docs/project/reproduction/spatz_grid_v2/phase-breakdown.png",
+    "docs/project/reproduction/spatz_grid_v2/phase-breakdown.svg",
+    "soft_hier/flex_cluster_sdk/app_example/gemm/spatz_grid_v2/grid.c",
+    "soft_hier/flex_cluster_sdk/app_example/gemm/spatz_grid_v2/gemm_fp32.S"
+  ],
+  "published_artifact_sha256": {
+    "controlled-parallel-phases.png": "3bc6aeedcd42a0141993881a54ce46bb9a959c54327cae874f0094c4098edd26",
+    "controlled-parallel-phases.svg": "d533b48166fd8ff0257aeca864ff9082ece7dfbfe65a38640d9c3dc36f49cfdb",
+    "controlled-parallel-results.json": "caca1c4046f402f7fce7972978a38cbbc2f0d31a3bdbf6a545316f286433e979",
+    "controlled-prelaunch.json": "32e95579b28cae8578870643ecafd772e666d20a092bea7a9f97ad595c51e76c"
+  },
+  "retries": 0,
+  "simulations": 2,
+  "status": "passed",
+  "targeted_host_tests_passed": 3
+}

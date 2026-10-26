@@ -12,6 +12,8 @@ def plot(source, output):
     import numpy as np
     data=json.loads(source.read_text())
     assert data['units']=='simulated ns' and data['clock_hz']==1_000_000_000
+    controlled=data.get('direct_variant')=='direct_parallel'
+    names=['Direct input / parallel output','Broadcast / parallel output'] if controlled else ['Direct','Broadcast']
     keys=['hbm_input_schedule','sync_after_input','broadcast_schedule','sync_after_broadcast',
           'compute_and_required_sync','output_schedule','final_sync']
     labels=['HBM schedule','HBM completion join','Broadcast distribution','Distribution completion join',
@@ -22,20 +24,20 @@ def plot(source, output):
     totals=np.array([data['variants'][v]['application_ns']/1000 for v in ('direct','broadcast')])
     assert np.allclose(phases.sum(axis=1),totals)
     plt.rcParams.update({'font.family':'DejaVu Sans','svg.fonttype':'none','font.size':10})
-    fig=plt.figure(figsize=(11.2,6.4),facecolor='white')
-    ax=fig.add_axes([.105,.57,.84,.31])
+    fig=plt.figure(figsize=(12.8 if controlled else 11.2,6.4),facecolor='white')
+    ax=fig.add_axes([.24 if controlled else .105,.57,.70 if controlled else .84,.31])
     left=np.zeros(2)
     for i,label in enumerate(labels):
         ax.barh([1,0],phases[:,i],left=left,height=.48,color=colors[i],label=label,linewidth=0)
         left+=phases[:,i]
     for y,total in zip([1,0],totals):
         ax.text(total+.65,y,f'{total:.3f} µs',va='center',weight='bold')
-    ax.set_yticks([1,0],['Direct','Broadcast']);ax.set_xlim(0,73);ax.set_ylim(-.6,1.6)
+    ax.set_yticks([1,0],names);ax.set_xlim(0,73);ax.set_ylim(-.6,1.6)
     ax.set_xlabel('Simulated application time (µs)');ax.set_axisbelow(True)
     ax.xaxis.grid(True,color='#e2e8f0',linewidth=.7)
     for side in ('top','right','left'):ax.spines[side].set_visible(False)
     ax.spines['bottom'].set_color('#cbd5e1');ax.tick_params(axis='y',length=0)
-    fig.suptitle('K=64 FP32 Spatz: complete 4×4-grid schedules',x=.105,y=.975,ha='left',weight='bold',fontsize=15)
+    fig.suptitle('K=64 FP32 Spatz: controlled parallel-output experiment' if controlled else 'K=64 FP32 Spatz: complete 4×4-grid schedules',x=.105,y=.975,ha='left',weight='bold',fontsize=15)
     fig.text(.105,.925,'1 GHz · one accepted run per variant · validation excluded',color='#475569')
     fig.legend(*ax.get_legend_handles_labels(),loc='upper center',bbox_to_anchor=(.52,.515),
                ncol=3,frameon=False,fontsize=8.5)
@@ -48,7 +50,7 @@ def plot(source, output):
         cell.set_edgecolor('#e2e8f0');cell.set_linewidth(.4)
         if col==0:cell.get_text().set_ha('left')
         if row==0:cell.set_facecolor('#f1f5f9');cell.get_text().set_weight('bold')
-    fig.text(.105,.015,'Direct output is serialized; broadcast output is parallel. Overall improvement covers both schedules.',
+    fig.text(.105,.015,'Both outputs parallel; experimental direct is not recovered historical code. One run each; timeout remains unexplained.' if controlled else 'Direct output is serialized; broadcast output is parallel. Overall improvement covers both schedules.',
              color='#475569',fontsize=8.5)
     for suffix in ('.png','.svg'):
         fig.savefig(output.with_suffix(suffix),dpi=180,facecolor='white')

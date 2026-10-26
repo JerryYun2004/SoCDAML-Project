@@ -58,6 +58,32 @@ def verify_package():
     return meta
 
 
+
+EXPERIMENT = 'direct_parallel'
+
+
+def target_sources(variant):
+    """Preserve accepted assets; experimental driver differs only in output policy."""
+    meta = verify_package()
+    paths = {name: ASSETS/name for name in meta['exact_source_sha256']}
+    if variant == EXPERIMENT:
+        original = (ASSETS/'grid.c').read_text()
+        old = '    t[5]=cycle32();\n    if (!GRID_BROADCAST) {'
+        new = '    t[5]=cycle32();\n    if (!GRID_BROADCAST && !GRID_PARALLEL_OUTPUT) {'
+        header = ('/* Controlled experiment: benchmark-4-derived direct input, benchmark-5 parallel\n'
+                  ' * output. This is new experimental code, not recovered historical code. */\n'
+                  '#define GRID_PARALLEL_OUTPUT 1\n')
+        path = ASSETS/'experimental/grid_direct_parallel.c'
+        require(original.count(old) == 1 and path.read_text() == header + original.replace(old,new),
+                'Experimental driver must change only the output selection.')
+        paths['grid.c'] = path
+    return paths
+
+
+def source_hashes(variant):
+    return {name:native.sha(path) for name,path in target_sources(variant).items()}
+
+
 def model_guard(root):
     """Read-only: no setup, patching, compilation, or simulator launch."""
     root = Path(root).resolve()
@@ -83,6 +109,11 @@ def config_fingerprint(config, root):
     from broadcast_checks import canonical_config
     elf = config['target']['chip']['cluster_0']['loader']['binary'][0]
     value = canonical_config(config, elf)
+    def normalize_debug(item):
+        if isinstance(item, dict): return {k:normalize_debug(v) for k,v in item.items()}
+        if isinstance(item, list): return [normalize_debug(v) for v in item]
+        return item.replace('debug_binary_0_grid_direct_parallel.elf.debugInfo','<ELF_DEBUG>') if isinstance(item,str) else item
+    value = normalize_debug(value)
     # Only workspace paths and already-reviewed observation/ELF metadata are
     # normalized. Hardware, ISA, latencies, clocks and topology remain checked.
     def rebase(item):
