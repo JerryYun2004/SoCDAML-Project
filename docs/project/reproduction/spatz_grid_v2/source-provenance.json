@@ -1,0 +1,27 @@
+{
+  "archived_runners": {
+    "trace-controls.py": "c55a515995835d6c480488b7c2725904b6a511ff3cde8cabf571d11b39c1cf77",
+    "verify_grid_broadcast_v2_pty.py": "17a7fb3cdd1f6affa0e32dd205d36a9e793e1ae205b121d522e846cd6a01cee7",
+    "verify_grid_direct_v2.py": "c4f381d5de806866c9ab954a4a9e125c22c499e9a3a9efbf6b29c69dac38d85c"
+  },
+  "exact_target_sources": {
+    "gemm_fp32.S": "ee72358d3d345f7196764dfc4a11484bea6b0bffa8313d88137ddbbb5dbfc56b",
+    "grid.c": "6ee7122bdaa6d4a8d81a16330cea788708cc434ba439dd61b62c206ef4786d91",
+    "grid.ld": "f55a2d3e74dfa8c86c6b4bf6111e667054dbcd3e66adc17a1b4fc96348e0f61c",
+    "word_export.h": "761d065c5da4fa650c3d2e12a775f63ec805f2dd641414b44a4a16f3e459f47e"
+  },
+  "notes": [
+    "Exact target source bytes retained, including attribution.",
+    "Validated checker modules copied without edits.",
+    "direct_checks.py, broadcast_checks.py and capture.py retain accepted helper function bodies with packaged imports/globals.",
+    "New reproduce.py provides path-independent orchestration; provenance runners are historical references, not entrypoints."
+  ],
+  "validated_modules": {
+    "grid_diagnose.py": "ccca5e6f869a480eafd03be1a6889a44756c2b7bb43f6f9d8adbaff06cfd22a4",
+    "presentation_grid.py": "0817ee16a83621bca492ad5119ef9a894d543051396f84dd4f5601feb47b3e1f",
+    "presentation_spatz.py": "f5c9bc6437dda0a5bedf095274546a0190949c1f50270a0f727271d29eb30988",
+    "spatz_cycle_compat.py": "d6e1949a76070808a0813d4706ec7d6d7d252177e54e23134f179c808cf84b72",
+    "spatz_macos_compat.py": "5e818ba8140f0a1a99a6db2096b0359d8accd3bac81dbdc32e77c7818fd880f6",
+    "word_export.py": "b9baf9f7d00135d0c6597ce4085e8abe92ba2b85b737acd18bf6111dafff922c"
+  }
+}

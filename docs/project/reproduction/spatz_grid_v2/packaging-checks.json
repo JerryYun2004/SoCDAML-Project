@@ -1,0 +1,37 @@
+{
+  "accepted_evidence_revalidated": {
+    "broadcast_words": 262144,
+    "direct_words": 262144,
+    "vector_ops_each": 82944
+  },
+  "chart": "phase-breakdown.png and .svg generated from accepted-results.json; PNG visually inspected",
+  "compile_only_build": "/Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-build-qcdpszj6",
+  "documentation_links_checked": 24,
+  "environment_rebuilt": false,
+  "exact_validated_sources_and_parser_hashes_checked": true,
+  "model_dependencies_paths_checked": true,
+  "new_simulations": 0,
+  "original_benchmarks_unchanged": true,
+  "package_unit_checks": 3,
+  "rebuilt_allocated_sections_identical_to_accepted": {
+    "broadcast": {
+      ".rodata": "d189108f84bbc4980b7a6faf11d1635e5930f9f50d3e26dbebf49fe4eea0174b",
+      ".sdata": "ca77c148b887977dda509ff48a304ac987d011942365e9edbc303ad10f7149f6",
+      ".socdaml_spatz_gemm": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+      ".text": "049809058e92106880ddd96cec03cb5674938c91d13b96cf744f9b31f1b09767"
+    },
+    "direct": {
+      ".rodata": "d7c9c5dc62b8c89eafae6b1d9d3cce4395c3f0a525106e11d78d88ba7d4d321f",
+      ".sdata": "ca77c148b887977dda509ff48a304ac987d011942365e9edbc303ad10f7149f6",
+      ".socdaml_spatz_gemm": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+      ".text": "12845b4318bf73a4906e0277a5ea7a392046c408268fcbe04aef35679d76dd10"
+    }
+  },
+  "remaining_gaps": [
+    "No fresh simulation of the packaged CLI (explicitly out of scope).",
+    "Requires the existing pinned native profile/toolchain; no provisioning/relocation certification.",
+    "Raw evidence remains in native workspace; hashes and summaries are in repo.",
+    "One accepted run each; intermittent startup timeout unresolved."
+  ],
+  "status": "packaging_checks_passed_no_simulations"
+}

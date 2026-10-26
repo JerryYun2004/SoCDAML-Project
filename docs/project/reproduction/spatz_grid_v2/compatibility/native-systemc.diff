@@ -1,0 +1,17 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 38aafb0..3c7b4c1 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -506,6 +506,12 @@ set_target_properties (systemc
+                        SOVERSION ${SystemCLanguage_SOVERSION}
+                        INSTALL_NAME_DIR ${CMAKE_INSTALL_FULL_LIBDIR})
+ 
++# SoCDAML native: link with the final RPATH so repeated installation needs no edit.
++if(APPLE)
++  set_property(TARGET systemc PROPERTY BUILD_WITH_INSTALL_RPATH TRUE)
++endif()
++
++
+ 
+ ###############################################################################
+ # Install rules for SystemC library

@@ -1,0 +1,21 @@
+{
+  "common_flags": [
+    "-march=rv32imafdv_zfh",
+    "-mabi=ilp32d",
+    "-mcmodel=medlow",
+    "-O3",
+    "-g",
+    "-fno-builtin",
+    "-fno-tree-vectorize",
+    "-fno-common",
+    "-ffunction-sections",
+    "-fno-lto"
+  ],
+  "compiler": "/Users/jerryyun/projects/SoCDAML-native/prefix/riscv/bin/riscv32-unknown-elf-gcc",
+  "compiler_sha256": "b1b82ab8e76a0f5dbebc899963e6598c02aaf5d0020c3f411be31c856b2fca1b",
+  "kernel_address": 2151612416,
+  "kernel_bytes_sha256": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+  "kernel_source_sha256": "ee72358d3d345f7196764dfc4a11484bea6b0bffa8313d88137ddbbb5dbfc56b",
+  "shared_object_sha256": "f3abf8564734acd1f1b262675ea2efbb445e3a361c4156a8e68b0d222f39fca6",
+  "version": "riscv32-unknown-elf-gcc (g04696df0963) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+}

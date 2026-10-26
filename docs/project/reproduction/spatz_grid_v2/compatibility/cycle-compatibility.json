@@ -1,0 +1,9 @@
+{
+  "name": "spatz_cycle_clock_v1",
+  "path": "core/models/cpu/iss/src/csr.cpp",
+  "before_sha256": "73d0cc960c85a41b24e537e95915412cabad1ea19de9a5d019451ff712a32c6a",
+  "after_sha256": "065c1fa055af48608ff1694dddbadd4576bb661e646ff39bf055315ff52807c8",
+  "counter": "cycle CSR 0xC00",
+  "source": "Csr::mcycle_access -> iss.top.clock.get_cycles()",
+  "change": "One callback registration; no instruction timing equations changed"
+}

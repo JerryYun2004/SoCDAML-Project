@@ -1,0 +1,67 @@
+{
+  "accepted_elf_sha256": {
+    "broadcast": "3714d21b60f7091147ca384bcfd4b85aff9a7e3211e1870a0406fac963618544",
+    "direct": "0116809c593e837396d53eef079194c2932ba0048be596786535fd6e0da304be"
+  },
+  "accepted_evidence": {
+    "presentation-grid-broadcast-v2-pty-69p_kpqx": {
+      "archive_sha256": "3bc7e0f396459368b4571f9bb7d7e3fd88ed102d446005b8d17705a4169f200f",
+      "artifact_hashes_verified": 33,
+      "report_sha256": "510b78f53cb7ec04ec2cf690b83fddee7aae2c2f5b0c03d91352c474214cf54c"
+    },
+    "presentation-grid-direct-v2-0puwdfmc": {
+      "archive_sha256": "74ce6e5c55cfe0cbe143a12130eb511342ae56c6e8feeb746e2fca11df4cbd96",
+      "artifact_hashes_verified": 24,
+      "report_sha256": "03493246dfd5464c741eae88a2c3915b0ebe3a88ac30cb09104d52adc63739be"
+    }
+  },
+  "exact_source_sha256": {
+    "gemm_fp32.S": "ee72358d3d345f7196764dfc4a11484bea6b0bffa8313d88137ddbbb5dbfc56b",
+    "grid.c": "6ee7122bdaa6d4a8d81a16330cea788708cc434ba439dd61b62c206ef4786d91",
+    "grid.ld": "f55a2d3e74dfa8c86c6b4bf6111e667054dbcd3e66adc17a1b4fc96348e0f61c",
+    "word_export.h": "761d065c5da4fa650c3d2e12a775f63ec805f2dd641414b44a4a16f3e459f47e"
+  },
+  "kernel_sha256": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+  "model_config_fingerprint": "ed3fc4b18fdddcdcc98d81e6b558c09666a9fd7b6915a910d3502fa65684e508",
+  "native_root_at_capture": "/Users/jerryyun/projects/SoCDAML-native",
+  "original_benchmark_sha256": {
+    "benchmark_4.c": "d39cf4221cf39f7471409dd14e4c5a267c47020181b34b463f8c8f082db8b583",
+    "benchmark_5.c": "56a780d05874313dd09e11d4fe93023893754c9641e9da7f0e0979dfd268e7a9"
+  },
+  "profile": "presentation-spatz-v1",
+  "protocol": "source_scheduled_spatz_grid_v2",
+  "revisions": {
+    "DRAMSys": "8e021eada2cb937d5be24dbd02f3980e2193d6ec",
+    "SystemC": "38b8a2c61aafe40de44296bee0c9c28ac4e80b01",
+    "core": "bda268a4808708a48eab21981c7d6bbced1577d7",
+    "gcc": "04696df09633baf97cdbbdd6e9929b9d472161d3",
+    "pulp": "3ca2016d056dda72317e27c4319fc6174b5f8c4d",
+    "riscv_toolchain": "935b263c8ef7f250819c74aeb7736c87ad87ef2b",
+    "socdaml_source": "707cc6f0db370d16f608de7b9ff86e9c758d95e9"
+  },
+  "tool_versions": {
+    "SystemC": "2.3.3",
+    "gcc": "14.2.0",
+    "host": "Apple Silicon macOS",
+    "target_flags": [
+      "-march=rv32imafdv_zfh",
+      "-mabi=ilp32d",
+      "-mcmodel=medlow",
+      "-O3",
+      "-g",
+      "-fno-builtin",
+      "-fno-tree-vectorize",
+      "-fno-common",
+      "-ffunction-sections",
+      "-fno-lto"
+    ]
+  },
+  "validated_module_sha256": {
+    "grid_diagnose.py": "ccca5e6f869a480eafd03be1a6889a44756c2b7bb43f6f9d8adbaff06cfd22a4",
+    "presentation_grid.py": "0817ee16a83621bca492ad5119ef9a894d543051396f84dd4f5601feb47b3e1f",
+    "presentation_spatz.py": "f5c9bc6437dda0a5bedf095274546a0190949c1f50270a0f727271d29eb30988",
+    "spatz_cycle_compat.py": "d6e1949a76070808a0813d4706ec7d6d7d252177e54e23134f179c808cf84b72",
+    "spatz_macos_compat.py": "5e818ba8140f0a1a99a6db2096b0359d8accd3bac81dbdc32e77c7818fd880f6",
+    "word_export.py": "b9baf9f7d00135d0c6597ce4085e8abe92ba2b85b737acd18bf6111dafff922c"
+  }
+}

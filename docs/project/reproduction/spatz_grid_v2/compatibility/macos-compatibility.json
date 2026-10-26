@@ -1,0 +1,8 @@
+{
+  "name": "spatz_macos_u64_v1",
+  "path": "core/models/cpu/iss/include/isa_lib/vint.h",
+  "declarations_changed": 70,
+  "before_sha256": "96a0484fb2771ffea1c85eda6e4513e18f7241676f3b1b7fc1c87952ac36063a",
+  "after_sha256": "be1756b7dccd5498c89a4d71f45269a965592f13fe5076082e3858701ca02f01",
+  "scope": "C++ host bit-container types only; arithmetic, latency, target kernel and hardware config unchanged"
+}

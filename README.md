@@ -29,12 +29,31 @@ the transfer geometry, synchronization, and timing boundaries.
 
 ## Reproduction status
 
-**Source cleanup is available; the presentation's performance reproduction is
-pending.** The five recovered sources use scalar FP32 GEMM with **K=256**.
-The slides describe **K=64**, Spatz_4 per cluster, and west+north HBM channels.
-The currently validated native configuration disables Spatz and has west HBM
-channels only. Merely enabling Spatz does not turn these scalar loops into a
-vector kernel. See the [source audit](docs/project/SOURCE_AUDIT.md).
+**The current K=64 FP32 Spatz reconstruction has an accepted native grid pair.**
+Complete input readiness is **13.565 / 6.904 µs**, and the continuous application
+interval is **63.720 / 53.273 µs**, direct/broadcast at 1 GHz. Overall schedule
+speedup is **1.196103×**, saving **10.447 µs (16.395%)**. Direct output is
+serialized and broadcast output parallel, so this is a comparison of the complete
+schedules, not isolated input-broadcast attribution. The repository CLI has now
+completed one additional run per variant end to end; every measured duration
+matched the original accepted run exactly. The original results remain preserved.
+These two observations each do not resolve the intermittent startup timeout or
+verify fresh-machine provisioning.
+
+See the [focused results and phase chart](docs/project/SPATZ_GRID_V2_RESULTS.md)
+and [repository-owned reproduction workflow](tools/socdaml/spatz_grid_v2/README.md).
+The exact accepted application/kernel and parser are packaged in this repository;
+the workflow uses the existing isolated native profile without temporary kit or
+log-only script dependencies. Raw accepted captures remain preserved externally
+under `SoCDAML-native/logs`, with identities/hashes in the results JSON.
+
+The five recovered sources remain scalar FP32 GEMM with **K=256**. They are
+preserved alongside the supplemental vector reconstruction, which uses a separate
+Spatz-enabled 4×4 profile with four west and four north HBM channels instantiated.
+All reconstructed matrix addresses retain west node 0 placement and the source
+global-join schedules. This does not claim exact reproduction of the historical
+presentation.
+See the [source audit](docs/project/SOURCE_AUDIT.md).
 
 The slide results are historical reference values, not fresh measurements of
 this cleanup:
@@ -59,6 +78,8 @@ of the complete strategies, not an isolated measurement of broadcast hardware.
 - `docs/project/SOURCE_AUDIT.md`: precise source differences and cleanup edits.
 - `docs/project/reproduction/`: pinned originals, source hashes, and review diff.
 - `tools/socdaml/`: existing setup, snapshot, and configuration utilities.
+- `tools/socdaml/spatz_grid_v2/`: packaged native V2 check/build/run/validation workflow.
+- `docs/project/SPATZ_GRID_V2_RESULTS.md`: accepted reconstructed pair, boundaries, chart and provenance.
 - `core/`, `pulp/`: upstream submodules; retain their revision and license history.
 
 Existing `_checked`, `_bench`, and `_profile` applications, when present, belong
@@ -71,11 +92,14 @@ matched row experiment have already completed. **Do not repeat the scalar phase
 profiling milestone for this cleanup.** The current `SoCDAML_MacNative` package
 installs these source/documentation changes without rebuilding or running GVSoC.
 
-Before a presentation reproduction run, recover or identify the original Spatz
-GEMM implementation, matching build flags, topology, and HBM placement. Reconcile
-the source barriers with the slide notes, validate all output elements and DMA
-destinations, and then measure the five cases using one documented timing
-definition. Follow [REPRODUCTION.md](docs/project/REPRODUCTION.md).
+The reconstructed K=64 grid pair now passes full numerical and completion-boundary
+checks. Use the [V2 workflow](tools/socdaml/spatz_grid_v2/README.md) to inspect
+dependencies, build either application, validate preserved evidence or regenerate
+results/figures. Only an explicit `run` command starts a bounded simulation;
+there is no automatic retry or environment rebuild. Historical percentages remain
+reference values, not targets for tuning. Earlier reproduction history remains
+in [REPRODUCTION.md](docs/project/REPRODUCTION.md) and
+[CODEX_STATUS.md](docs/project/CODEX_STATUS.md).
 
 New personal projects are deferred until this reproduction is complete. Keep
 them in a separate repository with explicit attribution and independent scope.

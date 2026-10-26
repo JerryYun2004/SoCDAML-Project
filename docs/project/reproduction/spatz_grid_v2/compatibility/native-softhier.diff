@@ -1,0 +1,12 @@
+diff --git a/soft_hier/flex_cluster/light_redmule.cpp b/soft_hier/flex_cluster/light_redmule.cpp
+index ae52450..6d35414 100644
+--- a/soft_hier/flex_cluster/light_redmule.cpp
++++ b/soft_hier/flex_cluster/light_redmule.cpp
+@@ -1195,7 +1195,7 @@ void LightRedmule::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+             break;
+ 
+         default:
+-            _this->trace.fatal("[LightRedmule] INVALID RedMule Status: %d\n", _this->state);
++            _this->trace.fatal("[LightRedmule] INVALID RedMule Status: %u\n", static_cast<unsigned int>(_this->state.get()));
+     }
+ }

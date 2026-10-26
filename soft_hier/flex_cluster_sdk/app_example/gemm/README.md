@@ -1,5 +1,13 @@
 # GEMM benchmark sources
 
+**Accepted supplemental reconstruction:** [`spatz_grid_v2/`](spatz_grid_v2/)
+contains the exact validated K=64 FP32 Spatz driver, shared kernel, export codec
+and linker script. The direct/broadcast continuous intervals are **63.720 /
+53.273 µs**, a full-schedule comparison including serialized versus parallel
+output. See the [focused results](../../../../docs/project/SPATZ_GRID_V2_RESULTS.md)
+and [packaged workflow](../../../../tools/socdaml/spatz_grid_v2/README.md).
+The five recovered scalar sources described below are preserved separately.
+
 These are cleaned derivatives of Jerry Yun's `benchmark_1.c` through
 `benchmark_5.c` at superproject revision
 `707cc6f0db370d16f608de7b9ff86e9c758d95e9`.

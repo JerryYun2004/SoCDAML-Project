@@ -1,0 +1,202 @@
+{
+  "accepted_observations_per_variant_including_reference": 2,
+  "aggregation": "No averaging or replacement of original accepted-results.json.",
+  "captured_output_limit_each": 67108864,
+  "date": "2026-10-26",
+  "existing_build_id": "spatz-grid-v2-build-qcdpszj6",
+  "kernel_sha256": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+  "limitations": [
+    "Two matching observations each are a small repeatability check, not a variability/stability guarantee.",
+    "Intermittent startup timeout remains unexplained and is not claimed fixed.",
+    "Fresh-machine provisioning and arbitrary relocation remain unverified."
+  ],
+  "observations": {
+    "broadcast": {
+      "actual_DATA_IN_DMA_envelope_delta_ns": 0,
+      "actual_DATA_IN_DMA_envelope_ns": 6682,
+      "application_delta_ns": 0,
+      "application_ns": 53273,
+      "archive_sha256": "7b3e0b52ca8b56ae809112ae93712f891e6172d2b60af98a9630788c09b0942a",
+      "artifact_sha256": {
+        "checking-tools/grid_diagnose.py": "ccca5e6f869a480eafd03be1a6889a44756c2b7bb43f6f9d8adbaff06cfd22a4",
+        "checking-tools/presentation_grid.py": "0817ee16a83621bca492ad5119ef9a894d543051396f84dd4f5601feb47b3e1f",
+        "checking-tools/presentation_spatz.py": "f5c9bc6437dda0a5bedf095274546a0190949c1f50270a0f727271d29eb30988",
+        "checking-tools/spatz_cycle_compat.py": "d6e1949a76070808a0813d4706ec7d6d7d252177e54e23134f179c808cf84b72",
+        "checking-tools/spatz_macos_compat.py": "5e818ba8140f0a1a99a6db2096b0359d8accd3bac81dbdc32e77c7818fd880f6",
+        "checking-tools/word_export.py": "b9baf9f7d00135d0c6597ce4085e8abe92ba2b85b737acd18bf6111dafff922c",
+        "gemm_fp32.S": "ee72358d3d345f7196764dfc4a11484bea6b0bffa8313d88137ddbbb5dbfc56b",
+        "grid.c": "6ee7122bdaa6d4a8d81a16330cea788708cc434ba439dd61b62c206ef4786d91",
+        "grid.ld": "f55a2d3e74dfa8c86c6b4bf6111e667054dbcd3e66adc17a1b4fc96348e0f61c",
+        "grid_broadcast.elf": "dbc16d658a4612f3437180d465648d1268654c7cee93c73875862cd2b378a074",
+        "packaged-runner.py": "3ee4d65e7b859c50b5f0c8db297c65e6b9acccc5c6a6eb6aad496f5e1298afa9",
+        "regex-verification.json": "bad183e744b5baab24fcd04a94500f018c5c25a8e99ec8802550751a1c7a212e",
+        "runtime-config.json": "353c0f7e8b8312623f2c12d7776dac25635576dbd28ea787d4b4991c19271669",
+        "sample-20s.txt": "d98046e758a82f903dcd26af306f908614b590d496760f5b635c8222d67107fe",
+        "sample-45s.txt": "44ce8de21e6c99a9690110c92f1ab5e7fe7de1840ea4d965091fe864d82200c9",
+        "trace.log": "1606646f8ce0fac9f1d416c81e0c5b63523c2d1a1f3c77585681e34b64db3013",
+        "verification.json": "8bfe6133bbdf0d056c3b24c04c041c4ec472827aab016e35d34d6ddb2f9c321a",
+        "word_export.h": "761d065c5da4fa650c3d2e12a775f63ec805f2dd641414b44a4a16f3e459f47e"
+      },
+      "captured_bytes": 19065279,
+      "command": [
+        "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/install/bin/gvsoc",
+        "--target=pulp.chips.flex_cluster.flex_cluster",
+        "--binary",
+        "/Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-broadcast-1ykiy6_p/grid_broadcast.elf",
+        "run",
+        "--trace-level=debug",
+        "--trace=^/chip/cluster_[0-9][0-9]*/loader/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/pe[012]/exception$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/cluster_registers/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/idma/fe/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/pe0/spatz/trace$"
+      ],
+      "complete_input_delta_ns": 0,
+      "complete_input_ns": 6904,
+      "cwd": "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/source",
+      "delta_from_original_phase_ns": {
+        "broadcast_schedule": 0,
+        "compute_and_required_sync": 0,
+        "final_sync": 0,
+        "hbm_input_schedule": 0,
+        "output_schedule": 0,
+        "sync_after_broadcast": 0,
+        "sync_after_input": 0
+      },
+      "elf_sha256": "dbc16d658a4612f3437180d465648d1268654c7cee93c73875862cd2b378a074",
+      "evidence_id": "spatz-grid-v2-broadcast-1ykiy6_p",
+      "exit_code": 0,
+      "host_seconds_not_performance": 106.42389066703618,
+      "input_sha256": "35d2f3b8a0671453efcef31dd5b50583edaaa7edfed0f7c994746fe98937e78e",
+      "numerical_words_checked": 262144,
+      "original_evidence_id": "presentation-grid-broadcast-v2-pty-69p_kpqx",
+      "output_sha256": "29069b77baa6bb64edc7217dc8e15aa457d80e8446f41ceb94b4366ccf1d0206",
+      "phase_ns": {
+        "broadcast_schedule": 2935,
+        "compute_and_required_sync": 42748,
+        "final_sync": 2941,
+        "hbm_input_schedule": 3175,
+        "output_schedule": 680,
+        "sync_after_broadcast": 383,
+        "sync_after_input": 411
+      },
+      "report_sha256": "0dd5edc139f74e8b8ba3ea392d43166806ff7b212785e74c9bebe287775f9612",
+      "samples": {
+        "2": {
+          "status": "launcher_not_found_in_own_process_group"
+        },
+        "20": {
+          "exit_code": 0,
+          "message": "Sampling process 72678 for 1 second with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 72678 written to file /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-broadcast-1ykiy6_p/sample-20s.txt\n",
+          "pid": 72678,
+          "status": "captured"
+        },
+        "45": {
+          "exit_code": 0,
+          "message": "Sampling process 72678 for 1 second with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 72678 written to file /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-broadcast-1ykiy6_p/sample-45s.txt\n",
+          "pid": 72678,
+          "status": "captured"
+        }
+      },
+      "stop_reason": "process_exit",
+      "vector_ops_checked": 82944
+    },
+    "direct": {
+      "actual_DATA_IN_DMA_envelope_delta_ns": 0,
+      "actual_DATA_IN_DMA_envelope_ns": 13259,
+      "application_delta_ns": 0,
+      "application_ns": 63720,
+      "archive_sha256": "ebd67ea10942c5b6cb2249033ae9b17e9910dd56701b5ea77b10ba99425800b4",
+      "artifact_sha256": {
+        "checking-tools/grid_diagnose.py": "ccca5e6f869a480eafd03be1a6889a44756c2b7bb43f6f9d8adbaff06cfd22a4",
+        "checking-tools/presentation_grid.py": "0817ee16a83621bca492ad5119ef9a894d543051396f84dd4f5601feb47b3e1f",
+        "checking-tools/presentation_spatz.py": "f5c9bc6437dda0a5bedf095274546a0190949c1f50270a0f727271d29eb30988",
+        "checking-tools/spatz_cycle_compat.py": "d6e1949a76070808a0813d4706ec7d6d7d252177e54e23134f179c808cf84b72",
+        "checking-tools/spatz_macos_compat.py": "5e818ba8140f0a1a99a6db2096b0359d8accd3bac81dbdc32e77c7818fd880f6",
+        "checking-tools/word_export.py": "b9baf9f7d00135d0c6597ce4085e8abe92ba2b85b737acd18bf6111dafff922c",
+        "gemm_fp32.S": "ee72358d3d345f7196764dfc4a11484bea6b0bffa8313d88137ddbbb5dbfc56b",
+        "grid.c": "6ee7122bdaa6d4a8d81a16330cea788708cc434ba439dd61b62c206ef4786d91",
+        "grid.ld": "f55a2d3e74dfa8c86c6b4bf6111e667054dbcd3e66adc17a1b4fc96348e0f61c",
+        "grid_direct.elf": "59a3f3f7d80a13d15b7f71e87deedfb555ab76255adda1a2d1970b3847c3fd85",
+        "packaged-runner.py": "3ee4d65e7b859c50b5f0c8db297c65e6b9acccc5c6a6eb6aad496f5e1298afa9",
+        "regex-verification.json": "bad183e744b5baab24fcd04a94500f018c5c25a8e99ec8802550751a1c7a212e",
+        "runtime-config.json": "f4afeabd9289bc32d6cb79bf5be061ca2568e0ba22a4f360d2e72ca33859ada0",
+        "sample-20s.txt": "7331f6e51c06dfb8fe3b1921aad3ef947b51d98564693f553fff01de9fa7c747",
+        "sample-45s.txt": "bba19291e60a39033a475999a0d8ff69e6528020dda7c0afefe142055746ae4f",
+        "trace.log": "3ab32623c8dca27e3979e992db9bca0bc0b2d11e36bbdc9a4226c67fe54a9d0d",
+        "verification.json": "08fe3b6940f892f3e35e753e60a8857979d42ee059b59ab423aa672fc5ba40cd",
+        "word_export.h": "761d065c5da4fa650c3d2e12a775f63ec805f2dd641414b44a4a16f3e459f47e"
+      },
+      "captured_bytes": 19189171,
+      "command": [
+        "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/install/bin/gvsoc",
+        "--target=pulp.chips.flex_cluster.flex_cluster",
+        "--binary",
+        "/Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-direct-63hpp47d/grid_direct.elf",
+        "run",
+        "--trace-level=debug",
+        "--trace=^/chip/cluster_[0-9][0-9]*/loader/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/pe[012]/exception$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/cluster_registers/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/idma/fe/trace$",
+        "--trace=^/chip/cluster_[0-9][0-9]*/pe0/spatz/trace$"
+      ],
+      "complete_input_delta_ns": 0,
+      "complete_input_ns": 13565,
+      "cwd": "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/source",
+      "delta_from_original_phase_ns": {
+        "broadcast_schedule": 0,
+        "compute_and_required_sync": 0,
+        "final_sync": 0,
+        "hbm_input_schedule": 0,
+        "output_schedule": 0,
+        "sync_after_broadcast": 0,
+        "sync_after_input": 0
+      },
+      "elf_sha256": "59a3f3f7d80a13d15b7f71e87deedfb555ab76255adda1a2d1970b3847c3fd85",
+      "evidence_id": "spatz-grid-v2-direct-63hpp47d",
+      "exit_code": 0,
+      "host_seconds_not_performance": 111.08816412498709,
+      "input_sha256": "35d2f3b8a0671453efcef31dd5b50583edaaa7edfed0f7c994746fe98937e78e",
+      "numerical_words_checked": 262144,
+      "original_evidence_id": "presentation-grid-direct-v2-0puwdfmc",
+      "output_sha256": "29069b77baa6bb64edc7217dc8e15aa457d80e8446f41ceb94b4366ccf1d0206",
+      "phase_ns": {
+        "broadcast_schedule": 0,
+        "compute_and_required_sync": 42745,
+        "final_sync": 89,
+        "hbm_input_schedule": 13473,
+        "output_schedule": 7321,
+        "sync_after_broadcast": 0,
+        "sync_after_input": 92
+      },
+      "report_sha256": "896d1313598e4c754fb464efb0f1e2dfa4093e3392d37e55d584eda60367f9b9",
+      "samples": {
+        "2": {
+          "status": "launcher_not_found_in_own_process_group"
+        },
+        "20": {
+          "exit_code": 0,
+          "message": "Sampling process 72294 for 1 second with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 72294 written to file /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-direct-63hpp47d/sample-20s.txt\n",
+          "pid": 72294,
+          "status": "captured"
+        },
+        "45": {
+          "exit_code": 0,
+          "message": "Sampling process 72294 for 1 second with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 72294 written to file /Users/jerryyun/projects/SoCDAML-native/logs/spatz-grid-v2-direct-63hpp47d/sample-45s.txt\n",
+          "pid": 72294,
+          "status": "captured"
+        }
+      },
+      "stop_reason": "process_exit",
+      "vector_ops_checked": 82944
+    }
+  },
+  "original_accepted_results_sha256": "0e8b0fd30c1758cfea7ce62843f17b0d6de9165209207faf63179f3140bb3540",
+  "retries": 0,
+  "schema": "socdaml_packaged_workflow_verification_v1",
+  "seconds_limit_each": 300,
+  "simulations_launched": 2,
+  "status": "both_packaged_runs_passed_end_to_end",
+  "timing_result": "All adjacent phase durations, input-ready/application intervals, DMA envelopes, per-worker compute and synchronization durations match their original accepted observations exactly."
+}

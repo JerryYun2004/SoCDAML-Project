@@ -1,0 +1,95 @@
+{
+  "clock_hz": 1000000000,
+  "comparisons": {
+    "DATA_IN_DMA_envelope": {
+      "broadcast_ns": 6682,
+      "direct_ns": 13259,
+      "reduction_percent": 49.60404253714458,
+      "saved_ns": 6577,
+      "speedup": 1.9842861418736906
+    },
+    "application": {
+      "broadcast_ns": 53273,
+      "direct_ns": 63720,
+      "reduction_percent": 16.39516635279347,
+      "saved_ns": 10447,
+      "speedup": 1.1961030916223978
+    },
+    "complete_input": {
+      "broadcast_ns": 6904,
+      "direct_ns": 13565,
+      "reduction_percent": 49.104312569111684,
+      "saved_ns": 6661,
+      "speedup": 1.9648030127462341
+    }
+  },
+  "kernel_sha256": "c8a8a2f32342ef6cb19921a5fb3f25cb8de9467b283562d2a54be7e086c7e3d6",
+  "limitations": [
+    "Current reconstruction, not exact historical presentation reproduction.",
+    "One accepted run per variant, no variability estimate.",
+    "Direct output serialized; broadcast output parallel. Overall comparison covers both full schedules.",
+    "Intermittent startup timeout remains unexplained."
+  ],
+  "samples_per_variant": 1,
+  "schema": "socdaml_spatz_grid_v2_results_v1",
+  "units": "simulated ns",
+  "variants": {
+    "broadcast": {
+      "DMA_envelope_ns": 6682,
+      "application_ns": 53273,
+      "archive_sha256": "3bc7e0f396459368b4571f9bb7d7e3fd88ed102d446005b8d17705a4169f200f",
+      "checked_words": 262144,
+      "complete_input_ns": 6904,
+      "elf_sha256": "3714d21b60f7091147ca384bcfd4b85aff9a7e3211e1870a0406fac963618544",
+      "evidence_id": "presentation-grid-broadcast-v2-pty-69p_kpqx",
+      "input_sha256": "35d2f3b8a0671453efcef31dd5b50583edaaa7edfed0f7c994746fe98937e78e",
+      "output_sha256": "29069b77baa6bb64edc7217dc8e15aa457d80e8446f41ceb94b4366ccf1d0206",
+      "phase_ns": {
+        "broadcast_schedule": 2935,
+        "compute_and_required_sync": 42748,
+        "final_sync": 2941,
+        "hbm_input_schedule": 3175,
+        "output_schedule": 680,
+        "sync_after_broadcast": 383,
+        "sync_after_input": 411
+      },
+      "report_sha256": "510b78f53cb7ec04ec2cf690b83fddee7aae2c2f5b0c03d91352c474214cf54c"
+    },
+    "direct": {
+      "DMA_envelope_ns": 13259,
+      "application_ns": 63720,
+      "archive_sha256": "74ce6e5c55cfe0cbe143a12130eb511342ae56c6e8feeb746e2fca11df4cbd96",
+      "checked_words": 262144,
+      "complete_input_ns": 13565,
+      "elf_sha256": "0116809c593e837396d53eef079194c2932ba0048be596786535fd6e0da304be",
+      "evidence_id": "presentation-grid-direct-v2-0puwdfmc",
+      "input_sha256": "35d2f3b8a0671453efcef31dd5b50583edaaa7edfed0f7c994746fe98937e78e",
+      "output_sha256": "29069b77baa6bb64edc7217dc8e15aa457d80e8446f41ceb94b4366ccf1d0206",
+      "phase_ns": {
+        "broadcast_schedule": 0,
+        "compute_and_required_sync": 42745,
+        "final_sync": 89,
+        "hbm_input_schedule": 13473,
+        "output_schedule": 7321,
+        "sync_after_broadcast": 0,
+        "sync_after_input": 92
+      },
+      "report_sha256": "03493246dfd5464c741eae88a2c3915b0ebe3a88ac30cb09104d52adc63739be"
+    }
+  },
+  "workload": {
+    "K": 64,
+    "M": 256,
+    "N": 256,
+    "clusters": [
+      4,
+      4
+    ],
+    "cores_per_cluster": 3,
+    "precision": "FP32",
+    "tile": [
+      64,
+      64
+    ]
+  }
+}
