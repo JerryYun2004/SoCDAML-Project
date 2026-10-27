@@ -1,0 +1,33 @@
+{
+  "scope": "Disposable core patch target files only; no build, no native source modification, no full provisioning claim.",
+  "base_revision": "bda268a4808708a48eab21981c7d6bbced1577d7",
+  "order": [
+    "native-core.diff",
+    "native-core-added-header.patch",
+    "spatz_macos_compat.patch",
+    "spatz_cycle_compat.patch"
+  ],
+  "target_files_equal_pinned_profile": [
+    "models/memory/memory_memcheck.hpp",
+    "models/memory/CMakeLists.txt",
+    "models/memory/dramsys.cpp",
+    "models/cpu/iss/include/spatz.hpp",
+    "models/cpu/iss/include/isa_lib/vint.h",
+    "models/cpu/iss/include/isa/redmule.hpp",
+    "models/cpu/iss/include/isa/rv32v.hpp",
+    "models/cpu/iss/include/isa/rv32frep.hpp",
+    "models/cpu/iss/include/isa/xdma.hpp",
+    "models/cpu/iss/include/cores/snitch/class.hpp",
+    "models/cpu/iss/include/cores/snitch_fp_ss/class.hpp",
+    "models/cpu/iss/isa_gen/isa_rvv.py",
+    "models/cpu/iss/flexfloat/flexfloat.h",
+    "models/cpu/iss/flexfloat/flexfloat.c",
+    "models/cpu/iss/src/csr.cpp",
+    "models/cpu/iss/src/spatz.cpp",
+    "models/cpu/iss/src/snitch/snitch.cpp",
+    "models/cpu/iss/src/snitch/decode.cpp",
+    "models/cpu/iss/src/snitch/iss.cpp"
+  ],
+  "added_header_source": "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/source/core/models/cpu/iss/include/isa/redmule.hpp",
+  "added_header_sha256": "0e2d7ea25a37e3810a763ce343156be6014afacd2ef50138e901c914c8b367a2"
+}

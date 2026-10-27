@@ -1,0 +1,198 @@
+{
+  "baseline": "aa045b570e5aaeb5df1b44efb2fb4015e51fb4f6",
+  "generated_header_count": 2,
+  "legacy_source_count": 19,
+  "missing_guard_inventory": {
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_broadcast_application.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "48a2ff18d13b9086508c1651d100b173c41c25acaf6619b4e8832a70218d343d",
+        "size": 17670
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_broadcast_application_v2.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "3afbf6468247acc1c0f12ea5544ef3f8896eb4bb07e72e4ba324bee23f4e66c0",
+        "size": 148016
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_broadcast_phases.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "23257ef75ec232604cfbb4f90d02503dbb5d5f30ef4501aaf06bb7fdfa72a50b",
+        "size": 15025
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_direct_application.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "720267f8f599323393d4351a2c321a9c85f8404d30996ed73ed1856dc56ae2b8",
+        "size": 16210
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_direct_application_v2.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "12245cb6dd52d7a49f46b72abd64d091932c652ef94417c08697641818368198",
+        "size": 146556
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/grid_direct_phases.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "23c400c05349071402c784c53cb804a107a457e6a76ffa32ed61c6fd0962c5dd",
+        "size": 13682
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_application.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "663e49f32af29825043b9edd9938eadbc6dcff0cb97b5e63930122b37d08fdfb",
+        "size": 16466
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_bench.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "7f43d21061f6759341c5beb264a81adc2f1fcb885108ec94831bcabfc76d5a8f",
+        "size": 10222
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_checked.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "da38df4b976520daef8afb1184a576111c2398ff65b41707ee871ca9ea2db9a7",
+        "size": 18353
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_phases.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "c35145750cd67ff6f0a8f4aa3e91079d67d5d191135d2bc45e0736389205327c",
+        "size": 16684
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_profile.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "9321fee8320fc0c78e3f419f597b08cfa272cc08f6e1fd1ac50c51ebbb157757",
+        "size": 10815
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_broadcast_reproduction.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "76675e503e96e36bd897187f44714a749400f8701414ee4abce54242e7ef236d",
+        "size": 16593
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_application.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "53369569e86b7be1d69f8bc95e1dbedcdddeb20a55072584324bdbdd461845f5",
+        "size": 15712
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_bench.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "9262114f472c2ab8a7cbffe3135afb718a4421a73ba60caecdf5643ada01e62c",
+        "size": 10216
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_checked.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "e307f343d1a5b15eca6c7f9a37187d43c632d946d6a1188ef6b0e962136d5a31",
+        "size": 17137
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_phases.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "805fc1f50488aed544b223c146aa5c18b15d18a2424b1b075b4491164ff560a5",
+        "size": 15980
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_profile.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "fd4a144b8c03c4de2a0bcc70920eae2296ad5197843cd97f577e6cc9b934d061",
+        "size": 10809
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/row_direct_reproduction.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "ac0b66db2535a8d2b40a425dfa4b51e61987189dce83acd109ad361dd3179a59",
+        "size": 15969
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/app_example/gemm/single_cluster_checked.c": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "cc8852f8110c85bde5a3752c23f1c06968bf1438014bc99f39d861473d78170d",
+        "size": 10276
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "legacy application source, not the V2 executable"
+    },
+    "soft_hier/flex_cluster_sdk/runtime/include/flex_cluster_arch.h": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "1432d92636eab4602f32e176729d54aafe79ebeff359a79d0760d1cfa9fef684",
+        "size": 1821
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "generated SDK architecture header"
+    },
+    "soft_hier/flex_cluster_sdk/runtime/include/flex_cluster_arch.inc": {
+      "manifest_entry": {
+        "mode": 420,
+        "sha256": "cb92e19ee8574f3922ffaeab8484e0b337e70729bb22408b2bf2b0c3141d60e3",
+        "size": 1649
+      },
+      "required_by": "exact configured-source inventory guard",
+      "role": "generated SDK architecture header"
+    }
+  },
+  "qualification": "No unrelated legacy applications imported. The exact existing configured profile is still required; rebuilding a portable source inventory from Git alone is unresolved.",
+  "scope": "Non-submodule files in configured-source.json absent from committed baseline. Core/pulp changes are covered separately by patches and generated config provenance."
+}

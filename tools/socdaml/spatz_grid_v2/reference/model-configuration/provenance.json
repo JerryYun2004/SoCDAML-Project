@@ -1,0 +1,14 @@
+{
+  "model-configuration/base-architecture.py": {
+    "source": "/Users/jerryyun/projects/SoCDAML-native/source/soft_hier/flex_cluster/flex_cluster_arch.py",
+    "sha256": "21de1ba2cc27b061fc5fc16823d34ffbf596b582889e03b797ebfb306d94a5a2"
+  },
+  "model-configuration/spatz-architecture.py": {
+    "source": "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/source/soft_hier/flex_cluster/flex_cluster_arch.py",
+    "sha256": "57285dbd1a46f09d8b806d397c5dc415cbb26f544680ebd77fd84a73a8507097"
+  },
+  "model-configuration/model.config": {
+    "source": "/Users/jerryyun/projects/SoCDAML-native/profiles/presentation-spatz-v1/build/gvsoc/gvsoc/configs/pulp.chips.flex_cluster.flex_cluster.config",
+    "sha256": "3a26e230dc828fe77a8faaf16eab39fd5facef780e5917afcd80cefd4c23f402"
+  }
+}

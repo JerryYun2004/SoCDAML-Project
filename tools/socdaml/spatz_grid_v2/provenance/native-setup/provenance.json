@@ -1,0 +1,95 @@
+{
+  "accepted_revisions_reference": "../../reference/metadata.json",
+  "captured_from_existing_workspace": true,
+  "files": {
+    "env.sh.snapshot": {
+      "role": "Captured existing environment; machine-specific provenance, not portable instructions.",
+      "sha256": "33f9ed9292c6b48efc3b0dbe55c283bf91a70fcf158ee09ccb87595fc1d6bc48",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/env.sh"
+    },
+    "native.sh": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "11012408a86b8be99dbeaa0b4a91e1c993a6fff46ff8689c7494eaed55966669",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/native.sh"
+    },
+    "prepare.py": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "035786af8308c1c99c7f4e0696c73234e220b7708ed453b719e28c7abef07708",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/prepare.py"
+    },
+    "probe.cpp": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "c104efa35042b14262aac1218bcb7382a9b679c3219603d476e190b46083dcc5",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/probe.cpp"
+    },
+    "probe/CMakeLists.txt": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "78ce49a147839013d30f8a46b5f6d2f50387b210ab4f14968ae4e77b2b9fba43",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/probe/CMakeLists.txt"
+    },
+    "python-compat.txt": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "a4c13dfc0543c7808134b74047cc94c6e9c0284110cb77a836d267e8f5da2427",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/python-compat.txt"
+    },
+    "requirements-native.txt": {
+      "role": "Captured existing environment; machine-specific provenance, not portable instructions.",
+      "sha256": "eebbfa0d25e19ae4ed920bfc4b26c94a5d46b4db6e63bd8ee98ae77f8b4b987a",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/requirements-native.txt"
+    },
+    "snapshot.py": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "835d15014f6807b2484a293c6836fbe459f2639c44932f2040c581fd20a1f0b0",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/snapshot.py"
+    },
+    "toolchain_math.py": {
+      "role": "Historical setup/build provenance; not a supported fresh-machine installer.",
+      "sha256": "6876646129d5fad95a3fe0662a8377e475a1298572544945132704eb1e16dcd4",
+      "source": "/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative/toolchain_math.py"
+    }
+  },
+  "fresh_provisioning_verified": false,
+  "revisions": {
+    "DRAMSys": {
+      "head": "8e021eada2cb937d5be24dbd02f3980e2193d6ec",
+      "recursive_submodules": []
+    },
+    "SystemC": {
+      "head": "38b8a2c61aafe40de44296bee0c9c28ac4e80b01",
+      "recursive_submodules": []
+    },
+    "core": {
+      "head": "bda268a4808708a48eab21981c7d6bbced1577d7",
+      "recursive_submodules": []
+    },
+    "pulp": {
+      "head": "3ca2016d056dda72317e27c4319fc6174b5f8c4d",
+      "recursive_submodules": []
+    },
+    "riscv_toolchain": {
+      "head": "935b263c8ef7f250819c74aeb7736c87ad87ef2b",
+      "recursive_submodules": [
+        " beb2cdbcda911764b2bed5e57921fe90493260bd binutils (binutils-2_43_1)",
+        "-ca371cf9c48186716d26c8e10d442affaf002c80 dejagnu",
+        " 04696df09633baf97cdbbdd6e9929b9d472161d3 gcc (releases/gcc-14.2.0)",
+        "-7b20890ad616baf811c8fe0e5d2bbb54b7c8ac42 gdb",
+        "-3d1aed874918c466a4477af1da35983ab036690e glibc",
+        "-3b5b5c1ec4a3095ab096dd780e84d7ab81f3d7ff llvm",
+        "-0784374d561435f7c787a555aeab8ede699ed298 musl",
+        " 26f7004bf73c421c3fd5e5a6ccf470d05337b435 newlib (newlib-4.4.0)",
+        "-2efabd3e6604b8a9e8f70baf52f57696680c7855 pk",
+        "-fd1952d814da738ed107e05583b3e02ac11e88ff qemu",
+        "-f7d0dba6012d49cb75b2f175a31a85cf4b2db3b3 spike",
+        "-ecbc412d0d93c8b7b77bec6539b290c9da5401cf uclibc-ng"
+      ]
+    },
+    "source": {
+      "head": "707cc6f0db370d16f608de7b9ff86e9c758d95e9",
+      "recursive_submodules": [
+        " bda268a4808708a48eab21981c7d6bbced1577d7 core (remotes/origin/dramsys_support-131-gbda268a4)",
+        " 3ca2016d056dda72317e27c4319fc6174b5f8c4d pulp (3ca2016)"
+      ]
+    }
+  },
+  "scope": "Only setup/dependency/model build stages preserved; legacy benchmark branches of native.sh reference scripts not included here. Do not use those branches."
+}

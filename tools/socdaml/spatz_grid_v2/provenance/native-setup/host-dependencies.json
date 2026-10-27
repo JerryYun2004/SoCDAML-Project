@@ -1,0 +1,204 @@
+{
+  "scope": "Observed installed versions, not a tested portable lockfile. No installation performed.",
+  "python_distributions": [
+    {
+      "name": "beautifulsoup4",
+      "version": "4.15.0"
+    },
+    {
+      "name": "chardet",
+      "version": "6.0.0.post1"
+    },
+    {
+      "name": "cmake",
+      "version": "3.28.4"
+    },
+    {
+      "name": "contourpy",
+      "version": "1.3.3"
+    },
+    {
+      "name": "cycler",
+      "version": "0.12.1"
+    },
+    {
+      "name": "DataProperty",
+      "version": "1.1.1"
+    },
+    {
+      "name": "fonttools",
+      "version": "4.67.0"
+    },
+    {
+      "name": "hjson",
+      "version": "3.1.0"
+    },
+    {
+      "name": "html2text",
+      "version": "2025.4.15"
+    },
+    {
+      "name": "jsonref",
+      "version": "1.1.0"
+    },
+    {
+      "name": "kiwisolver",
+      "version": "1.5.1"
+    },
+    {
+      "name": "Mako",
+      "version": "1.4.3"
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.2.0"
+    },
+    {
+      "name": "marko",
+      "version": "2.2.4"
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.4"
+    },
+    {
+      "name": "matplotlib",
+      "version": "3.11.2"
+    },
+    {
+      "name": "mbstrdecoder",
+      "version": "1.1.5"
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2"
+    },
+    {
+      "name": "mistune",
+      "version": "3.4.0"
+    },
+    {
+      "name": "ninja",
+      "version": "1.13.2"
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.6"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3"
+    },
+    {
+      "name": "pandas",
+      "version": "3.1.0"
+    },
+    {
+      "name": "pathvalidate",
+      "version": "3.3.1"
+    },
+    {
+      "name": "pexpect",
+      "version": "4.9.0"
+    },
+    {
+      "name": "pillow",
+      "version": "13.0.0"
+    },
+    {
+      "name": "pip",
+      "version": "26.2.2"
+    },
+    {
+      "name": "prettytable",
+      "version": "3.18.0"
+    },
+    {
+      "name": "ptyprocess",
+      "version": "0.7.0"
+    },
+    {
+      "name": "pyelftools",
+      "version": "0.33"
+    },
+    {
+      "name": "Pygments",
+      "version": "2.21.0"
+    },
+    {
+      "name": "pyparsing",
+      "version": "3.3.3"
+    },
+    {
+      "name": "pytablewriter",
+      "version": "1.2.1"
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0"
+    },
+    {
+      "name": "pytz",
+      "version": "2026.5"
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3"
+    },
+    {
+      "name": "rich",
+      "version": "15.0.0"
+    },
+    {
+      "name": "setuptools",
+      "version": "80.10.2"
+    },
+    {
+      "name": "six",
+      "version": "1.17.0"
+    },
+    {
+      "name": "soupsieve",
+      "version": "3.0.4"
+    },
+    {
+      "name": "tabledata",
+      "version": "1.3.5"
+    },
+    {
+      "name": "tabulate",
+      "version": "0.10.0"
+    },
+    {
+      "name": "tcolorpy",
+      "version": "0.1.7"
+    },
+    {
+      "name": "typepy",
+      "version": "1.3.5"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0"
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.9.3"
+    }
+  ],
+  "homebrew_opt_targets": {
+    "libsndfile": "../Cellar/libsndfile/1.2.2_1",
+    "libsamplerate": "../Cellar/libsamplerate/0.2.2",
+    "make": "../Cellar/make/4.4.1",
+    "bison": "../Cellar/bison/3.8.2",
+    "flex": "../Cellar/flex/2.6.4_2",
+    "texinfo": "../Cellar/texinfo/7.3_1",
+    "python@3.11": "../Cellar/python@3.11/3.11.17_1"
+  },
+  "historical_host_prerequisites_source": "native kit START_HERE.md, lines 165\u2013167",
+  "historical_host_prerequisites": [
+    "brew install git python@3.11 make gawk gnu-sed autoconf automake libtool \\",
+    "  gmp mpfr libmpc isl zlib expat texinfo bison flex gperf flock \\",
+    "  libsndfile libsamplerate"
+  ]
+}

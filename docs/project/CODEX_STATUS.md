@@ -888,3 +888,60 @@ submodules, build directories, toolchains and raw traces excluded. Local commit
 message: `Add controlled input comparison with matched parallel output`.
 No push or another experiment. Next action: review the local checkpoint with the
 unresolved 15-cycle qualification; further simulation needs separate authorization.
+
+
+## 2026-10-26 — publication review from committed aa045b5 tree
+
+Reviewed `aa045b570e5aaeb5df1b44efb2fb4015e51fb4f6` in a detached isolated
+checkout, independently of unrelated main-workspace changes and dirty submodules.
+No simulation, dependency installation or environment rebuild. Root README now
+concisely covers Jerry Yun's five original benchmark schedules, upstream
+SoftHier/PULP/GVSoC attribution, recovered scalar originals versus new Spatz
+reconstruction, both differently labeled/output-policy comparisons, and sources,
+results and reproduction links. Detailed material is consolidated in `SHARING.md`
+and the existing workflow/results documents.
+
+External-dependency audit captured the exact historical native setup/build subset
+(native.sh, prepare/snapshot/toolchain helpers, dependency probe and Python
+constraints), requirements/env provenance, recursive dependency revisions and
+observed host package versions, without toolchains/build trees or submodule
+contents. These are archival setup records, not a tested fresh-machine installer;
+legacy benchmark branches in the archived runner are not supported entrypoints.
+Exact base/Spatz architecture and generated model parameters are now retained.
+
+Found and captured one essential aggregate-patch omission: untracked added
+`core/models/cpu/iss/include/isa/redmule.hpp`. Its small separate patch plus the
+existing aggregate core diff and guarded unsigned-container/cycle transforms
+reproduce all **19 affected core files** byte-for-byte against the pinned profile
+in disposable storage. No real native/profile file was changed. Historical and
+aggregate patch routes overlap and must not both be applied; order is documented.
+
+Remaining source-inventory gap: the accepted whole-tree guard includes **19 legacy
+application files not in committed Git**, plus two generated SDK headers. No
+unrelated applications were imported. Existing pinned-profile execution remains
+verified; reconstructing that exact guarded source inventory from Git alone is
+not verified. Fresh provisioning, Mach-O relocation, a portable host lockfile and
+recipient-accessible raw-evidence distribution remain open. Original raw archives
+are retained externally; offline validation needs all members and original-root
+path normalization. Results inspection needs only Git files.
+
+Checks: read-only repository CLI `check` passed from isolated checkout; its code
+was verified byte-identical to aa045b5. Exact source/model/compiler/dependency and
+POSIX-BRE trace guards passed without compiler/simulator launch. Captured setup
+scripts passed shell/Python static syntax checks. Documentation links/anchors,
+tracked dependency paths, metadata hashes, result arithmetic and scoped diff were
+reviewed. Previously completed numerical/targeted tests were reused. No new
+performance result, chart or accepted-evidence change.
+
+Publication commit scope: root README, sharing/workflow/handoff documentation,
+small setup/configuration provenance and missing header patch/patch-order receipt.
+Original source/kernel, accepted JSON/charts and all raw evidence are unchanged.
+Unrelated working edits and dirty submodules remain unstaged; root README's
+unrelated edits are retained in its working copy separately from staged content.
+
+Configured branch: `cleanup/project-layout`; publication remote `origin` is
+`https://github.com/JerryYun2004/SoCDAML-Project.git`. `upstream` points to GVSoC and
+is not the publication destination. Proposed non-force command (not executed):
+`git push origin cleanup/project-layout:cleanup/project-layout`.
+Local checkpoint message: `Prepare SoCDAML reproduction for sharing`.
+Next action: review/share that local checkpoint; no release or further experiment.

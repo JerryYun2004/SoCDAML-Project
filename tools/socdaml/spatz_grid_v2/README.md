@@ -34,7 +34,7 @@ benchmarks and `docs/project/reproduction/originals/` are not replaced.
 From the cleanup repository root, set the existing native workspace path:
 
 ```bash
-native_root=/Users/jerryyun/projects/SoCDAML-native
+native_root="${SOCDAML_NATIVE_ROOT:?Set SOCDAML_NATIVE_ROOT to your existing native workspace}"
 repo_root="$PWD"
 py="$native_root/venv/bin/python"
 runner="$repo_root/tools/socdaml/spatz_grid_v2/reproduce.py"
@@ -170,13 +170,15 @@ Compile only the new application using the installed compiler:
 Use the fresh path printed by `build` as `experimental_build`. Each of the next
 commands explicitly starts one simulation; execute the second only if the first
 passes. Both retain fixed 300-second / 64-MiB limits, PTY draining, sparse events,
-concurrent sample attempts and no retry. Reuse the existing broadcast build ELF.
+concurrent sample attempts and no retry. Set `SOCDAML_BROADCAST_ELF` to the
+existing pinned broadcast ELF (or one built by this CLI); no fixed build directory
+is assumed.
 
 ```bash
 "$py" "$runner" --native-root "$native_root" run --variant direct_parallel \
   --elf "$experimental_build/grid_direct_parallel.elf"
 "$py" "$runner" --native-root "$native_root" run --variant broadcast \
-  --elf "$native_root/logs/spatz-grid-v2-build-qcdpszj6/grid_broadcast.elf"
+  --elf "${SOCDAML_BROADCAST_ELF:?Set the existing broadcast ELF path}"
 ```
 
 All existing direct-input numerical, DMA, vector-workload and timing checks apply
@@ -206,3 +208,13 @@ The controlled pair completed successfully on 2026-10-26, one run each. See
 Complete input/application times are 13.550/59.911 µs versus 6.904/53.273 µs;
 input/application speedups are 1.963× / 1.125×. Both outputs are parallel,
 with output/final-join totals 3.616 / 3.621 µs. Original results remain unchanged.
+
+## Sharing and external dependencies
+
+See the [sharing guide](../../../docs/project/SHARING.md) for the four distinct
+levels of reproducibility, patch order and raw-capture requirements. Historical
+native setup/build scripts are now preserved in [provenance/native-setup](provenance/native-setup/README.md),
+with hashes and exact revision observations. They are archival provenance,
+not a supported fresh-machine installer. `reference/model-configuration/` holds
+the exact base/Spatz architecture and generated model parameters. Current CLI
+commands use neither the external kit nor the archived setup entrypoints.

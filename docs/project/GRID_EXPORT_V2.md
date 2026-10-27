@@ -9,8 +9,9 @@ Direct output is serialized and broadcast output parallel, so this is a full
 schedule comparison, not isolated input-broadcast attribution. One sample each;
 the earlier timeout's cause/resolution remains unproven. See
 [CODEX_STATUS.md](CODEX_STATUS.md) for exact commands/evidence and phase details.
-All current one-run authorizations have been used. The implementation and
-host-check instructions below remain valid.
+All current one-run authorizations have been used. The development instructions
+below are archival provenance; use the tracked repository workflow for supported
+commands.
 
 **Packaged checkpoint:** the repository-owned CLI subsequently passed one new
 direct and one new broadcast run, matching all original phase timings exactly.
@@ -20,12 +21,14 @@ the earlier development checkpoint; the original results are not overwritten.
 Fresh-machine provisioning and the intermittent timeout remain unverified.
 
 Working kit:
-`/Users/jerryyun/projects/SoCDAML-native/kits/grid-export-v2/SoCDAML_MacNative`
+`$SOCDAML_NATIVE_ROOT/kits/grid-export-v2/SoCDAML_MacNative`
 
 The Downloads kit, installed Spatz profile, prior evidence and accepted
 single-cluster result remain unchanged. This working kit is a separate fork;
 its historical documentation does not authorize another benchmark campaign.
-The reusable patch is `tools/socdaml/grid-export-v2.patch` in the cleanup repo.
+The development-only export patch is superseded for the packaged workflow by
+the exact tracked `spatz_grid_v2/grid.c` and `word_export.h`; no external export
+patch is required to build the accepted applications.
 
 ## What changed
 
@@ -67,7 +70,7 @@ not establish simulated performance or guarantee completion within 60 seconds.
 From the native workspace, using the existing SDK-aware host compiler wrapper:
 
 ```bash
-cd /Users/jerryyun/projects/SoCDAML-native
+cd "${SOCDAML_NATIVE_ROOT:?Set the existing native workspace path}"
 export CC="$PWD/build/toolchain-host/bin/cc"
 venv/bin/python -m unittest discover \
   -s kits/grid-export-v2/SoCDAML_MacNative/reproduction/tests \
@@ -93,7 +96,7 @@ the original schedule/address expectations. Linux keeps its existing mappings.
 ## Compile only, without rebuilding the simulator
 
 ```bash
-cd /Users/jerryyun/projects/SoCDAML-native
+cd "${SOCDAML_NATIVE_ROOT:?Set the existing native workspace path}"
 source env.sh
 venv/bin/python \
   kits/grid-export-v2/SoCDAML_MacNative/reproduction/prepare_grid_export.py \

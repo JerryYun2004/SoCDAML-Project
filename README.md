@@ -1,105 +1,73 @@
-# SoCDAML: inter-cluster broadcast GEMM experiments
+# SoCDAML: inter-cluster GEMM data movement
 
-Jerry Yun's SoftHier application experiments compare direct HBM reads with
-inter-cluster sharing of GEMM inputs, first across one row and then across a
-4×4 cluster grid. The goal of this cleanup is a readable, reproducible account
-of the five benchmarks presented in **SoCDAML Presentation**.
+Jerry Yun's course-project benchmarks compare direct HBM input reads with
+inter-cluster input sharing, across one row and a 4×4 cluster grid. His original
+benchmark contributions are the five application schedules below. Project work
+also includes helpers for common free-region discovery and inter-cluster
+allocation/DMA.
+[Contribution boundaries](docs/project/CONTRIBUTIONS.md) distinguish adapted code
+from original work. This repository also records a later, validated Spatz
+reconstruction and its measurement evidence.
 
-The applications build on ETH Zurich / University of Bologna's PULP, SoftHier
-SDK, and GVSoC work. This repository does not claim authorship of those systems.
-See [upstream documentation](README.upstream.md) and
-[contributions](docs/project/CONTRIBUTIONS.md).
+The architecture models, SDK/runtime, GVSoC, SoftHier and PULP infrastructure
+come from their upstream authors, including ETH Zurich / University of Bologna.
+Upstream file credits and licenses remain applicable; this is not a claim of
+ownership of that infrastructure. See [upstream documentation](README.upstream.md).
 
-## Five experiments
+## Sources and scope
 
-Sources live in `soft_hier/flex_cluster_sdk/app_example/gemm/`.
-Coordinates below are **C[y,x]**. All cores participate in global barriers;
-the worker count is the number of active DM cores.
+The five recovered scalar FP32 benchmarks use K=256. Their exact originals and
+hashes are in [reproduction/originals](docs/project/reproduction/originals/);
+[cleaned application sources](soft_hier/flex_cluster_sdk/app_example/gemm/README.md)
+retain the following mapping:
 
-| File | Original | Workers | Experiment |
-| --- | --- | ---: | --- |
-| `single_cluster.c` | `benchmark_1.c` | 1 | Single-cluster GEMM baseline |
-| `row_direct.c` | `benchmark_2.c` | 4 | Each row worker fetches A and its B tile |
-| `row_broadcast.c` | `benchmark_3.c` | 4 | Fetch A once and broadcast it across row 0 |
-| `grid_direct.c` | `benchmark_4.c` | 16 | Each grid worker fetches its A/B strips |
-| `grid_broadcast.c` | `benchmark_5.c` | 16 | Row leaders share A; column leaders share B |
+| Original | Cleaned source | Schedule |
+|---|---|---|
+| benchmark 1 | single_cluster.c | One-cluster baseline |
+| benchmark 2 | row_direct.c | Four workers fetch input directly |
+| benchmark 3 | row_broadcast.c | Row workers share A |
+| benchmark 4 | grid_direct.c | Sixteen workers fetch A/B directly |
+| benchmark 5 | grid_broadcast.c | Row leaders share A; column leaders share B |
 
-[Benchmark notes](soft_hier/flex_cluster_sdk/app_example/gemm/README.md) explain
-the transfer geometry, synchronization, and timing boundaries.
+The separate [Spatz V2 applications](soft_hier/flex_cluster_sdk/app_example/gemm/spatz_grid_v2/README.md)
+reconstruct K=64 FP32 GEMM (256×64 × 64×256), 16 clusters at 1 GHz. The shared
+vector kernel and experimental direct/parallel-output driver are new
+reconstruction work, **not recovered historical code**. Historical slide results
+are not claimed as freshly reproduced. See the [source audit](docs/project/SOURCE_AUDIT.md).
 
-## Reproduction status
+## Accepted native comparisons
 
-**The current K=64 FP32 Spatz reconstruction has an accepted native grid pair.**
-Complete input readiness is **13.565 / 6.904 µs**, and the continuous application
-interval is **63.720 / 53.273 µs**, direct/broadcast at 1 GHz. Overall schedule
-speedup is **1.196103×**, saving **10.447 µs (16.395%)**. Direct output is
-serialized and broadcast output parallel, so this is a comparison of the complete
-schedules, not isolated input-broadcast attribution. The repository CLI has now
-completed one additional run per variant end to end; every measured duration
-matched the original accepted run exactly. The original results remain preserved.
-These two observations each do not resolve the intermittent startup timeout or
-verify fresh-machine provisioning.
+Times are simulated µs. Speedup = direct / broadcast. Validation is excluded.
 
-See the [focused results and phase chart](docs/project/SPATZ_GRID_V2_RESULTS.md)
-and [repository-owned reproduction workflow](tools/socdaml/spatz_grid_v2/README.md).
-The exact accepted application/kernel and parser are packaged in this repository;
-the workflow uses the existing isolated native profile without temporary kit or
-log-only script dependencies. Raw accepted captures remain preserved externally
-under `SoCDAML-native/logs`, with identities/hashes in the results JSON.
+| Comparison | Direct / broadcast output | Input readiness | Application | Input / application speedup |
+|---|---|---:|---:|---:|
+| [Original complete schedules](docs/project/SPATZ_GRID_V2_RESULTS.md) | Serialized / parallel | 13.565 / 6.904 | 63.720 / 53.273 | 1.965× / 1.196× |
+| [Matched parallel output](docs/project/SPATZ_GRID_V2_CONTROLLED_OUTPUT.md) | Parallel / parallel | 13.550 / 6.904 | 59.911 / 53.273 | 1.963× / 1.125× |
 
-The five recovered sources remain scalar FP32 GEMM with **K=256**. They are
-preserved alongside the supplemental vector reconstruction, which uses a separate
-Spatz-enabled 4×4 profile with four west and four north HBM channels instantiated.
-All reconstructed matrix addresses retain west node 0 placement and the source
-global-join schedules. This does not claim exact reproduction of the historical
-presentation.
-See the [source audit](docs/project/SOURCE_AUDIT.md).
+The original comparison includes the output-policy change. The controlled pair
+saves **6.638 µs (11.08%)** overall: 6.646 µs input saving minus 3 ns additional
+compute/synchronization and 5 ns output/synchronization. Its direct input policy
+is unchanged; the exact cause of its 15-cycle readiness difference remains
+unresolved. The reports link full-precision JSON, charts and evidence hashes.
 
-The slide results are historical reference values, not fresh measurements of
-this cleanup:
+There are two accepted observations each for original direct/broadcast, and one
+for each controlled-pair variant. These are small checks, not variability
+estimates. The intermittent timeout remains unexplained; fresh-machine
+provisioning and relocation remain unverified.
 
-| Comparison | Slide total-time reduction | Equivalent speedup |
-| --- | ---: | ---: |
-| Row: benchmark 2 → 3 | 24.7% | approximately 1.33× |
-| Grid: benchmark 4 → 5 | 35.4% | approximately 1.55× |
+## Inspect or reproduce
 
-Speedup = direct time / broadcast time. Time reduction = 1 − broadcast/direct.
-The grid comparison also changes output-store scheduling; it is a comparison
-of the complete strategies, not an isolated measurement of broadcast hardware.
+- **Inspect results:** source, reports, JSON and charts are tracked here; no native
+  environment or raw traces are needed to read them.
+- **Revalidate offline:** obtain the named raw evidence directories/archives;
+  they are preserved outside Git, not distributed by this repository.
+- **Execute:** use the existing pinned Apple Silicon native environment and the
+  [repository CLI](tools/socdaml/spatz_grid_v2/README.md). Only `run` simulates;
+  each launch is bounded to 300 seconds / 64 MiB without retries.
+- **Provision a new machine:** setup history, exact revisions, compatibility
+  order, configuration and remaining gaps are in the
+  [dependency and sharing guide](docs/project/SHARING.md). This is not a verified installer.
 
-## Repository map
-
-- `soft_hier/flex_cluster_sdk/app_example/gemm/`: five cleaned application sources.
-- `soft_hier/flex_cluster_sdk/app_example/diagnostics/`: bring-up and SDK examples.
-- `soft_hier/flex_cluster_sdk/app_example/experimental/`: unfinished application work.
-- `soft_hier/flex_cluster_sdk/runtime/`: existing SDK and allocation/DMA support.
-- `soft_hier/flex_cluster/`: simulator architecture and component configuration.
-- `docs/project/REPRODUCTION.md`: slide contract and completion criteria.
-- `docs/project/SOURCE_AUDIT.md`: precise source differences and cleanup edits.
-- `docs/project/reproduction/`: pinned originals, source hashes, and review diff.
-- `tools/socdaml/`: existing setup, snapshot, and configuration utilities.
-- `tools/socdaml/spatz_grid_v2/`: packaged native V2 check/build/run/validation workflow.
-- `docs/project/SPATZ_GRID_V2_RESULTS.md`: accepted reconstructed pair, boundaries, chart and provenance.
-- `core/`, `pulp/`: upstream submodules; retain their revision and license history.
-
-Existing `_checked`, `_bench`, and `_profile` applications, when present, belong
-to earlier validation work. Their results do not establish the slide speedups.
-
-## How to continue
-
-Native Apple Silicon bring-up, scalar correctness checks, and the earlier
-matched row experiment have already completed. **Do not repeat the scalar phase
-profiling milestone for this cleanup.** The current `SoCDAML_MacNative` package
-installs these source/documentation changes without rebuilding or running GVSoC.
-
-The reconstructed K=64 grid pair now passes full numerical and completion-boundary
-checks. Use the [V2 workflow](tools/socdaml/spatz_grid_v2/README.md) to inspect
-dependencies, build either application, validate preserved evidence or regenerate
-results/figures. Only an explicit `run` command starts a bounded simulation;
-there is no automatic retry or environment rebuild. Historical percentages remain
-reference values, not targets for tuning. Earlier reproduction history remains
-in [REPRODUCTION.md](docs/project/REPRODUCTION.md) and
-[CODEX_STATUS.md](docs/project/CODEX_STATUS.md).
-
-New personal projects are deferred until this reproduction is complete. Keep
-them in a separate repository with explicit attribution and independent scope.
+[CODEX_STATUS.md](docs/project/CODEX_STATUS.md) retains the detailed handoff.
+Upstream `core` and `pulp` remain submodules; build products, toolchains and large
+raw traces are intentionally excluded from publication checkpoints.

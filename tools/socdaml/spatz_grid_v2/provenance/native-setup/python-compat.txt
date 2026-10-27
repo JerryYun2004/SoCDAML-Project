@@ -1,0 +1,3 @@
+# The pinned GVSoC reggen imports pkg_resources.resource_filename.
+# Setuptools 82 removed pkg_resources; retain a known compatible release.
+setuptools==80.10.2
